@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dropwatch"
-version = "0.1.0"
-description = "Automated Twitch drop farmer for Overwatch campaigns, controlled from Discord"
+version = "0.2.0"
+description = "Twitch drop campaign miner with multi-signal stream-end detection"
 requires-python = ">=3.13"
 dependencies = [
     "aiohttp>=3.10",

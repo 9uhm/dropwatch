@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.2.0
+
+Background running, a system tray, and settings that persist.
+
+### Background running
+
+- `serve --detach` runs with no console window, so the terminal can be closed.
+  It waits for the detached copy's dashboard to answer before reporting success —
+  a windowless process has nowhere to print a port conflict.
+- A **system-tray icon** carries the controls a console window used to: open the
+  dashboard, open the channel on Twitch, pause/resume, quit. Labels track live
+  state, so it shows the current target and whether watching is paused. Optional;
+  its absence degrades to a log line.
+- `stop` ends a detached run and distinguishes a stale pid record from a live
+  process, so a crash can't leave `serve` believing it's still running.
+
+### Settings
+
+Previously CLI-only flags are now persisted config, editable from a new dashboard
+panel or from `config set`:
+
+| Setting | Does |
+| --- | --- |
+| `ui.open_dashboard` | Open the dashboard when watching starts |
+| `ui.open_twitch` | Open the channel's Twitch page when a target is picked |
+| `ui.reopen_twitch_on_rotate` | Re-open on every rotation, not just the first |
+| `ui.tray` | Show the tray icon |
+| `ui.host` / `ui.port` | Where the dashboard listens (CLI only, by design) |
+
+Opening Twitch is purely so you can watch the stream; crediting comes from
+telemetry either way and the browser plays no part in it.
+
+The write endpoint is guarded three ways: a custom header no cross-site request
+can set without a preflight the server never answers, an `Origin` check, and a
+key allowlist. `ui.host`/`ui.port` are off that allowlist deliberately — they need
+a restart, and a bad value entered from the page would make the page unreachable.
+
+### Fixed
+
+- **PIL was excluded from the frozen build**, which would have left the tray
+  permanently unavailable in the executable while working fine from source.
+- **The detached child shared the parent's PyInstaller unpack directory.**
+  PyInstaller advertises it through the environment; inherited, the child reused
+  it rather than extracting its own, so every bundled asset began 404ing the
+  moment the parent exited and cleaned up. Only reproducible frozen *and*
+  detached — the configuration people actually run.
+- `ui/stats.js` wasn't bundled, so the packaged dashboard rendered with silently
+  missing charts.
+
+115 tests.
+
 ## v0.1.0
 
 First release. Watches Twitch drop campaigns for Overwatch, detects when a stream
