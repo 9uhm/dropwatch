@@ -34,6 +34,13 @@ hiddenimports = [
     # tomllib backs the TOML settings source; sqlite3 backs the store.
     "tomllib",
     "sqlite3",
+    # The tray. pystray picks its backend at import time, so the Windows one has
+    # to be named explicitly or the frozen build finds no backend and falls back
+    # to "tray unavailable" -- which looks like a platform problem, not a build one.
+    "pystray",
+    "pystray._win32",
+    "PIL.Image",
+    "PIL.ImageDraw",
 ]
 
 excludes = [
@@ -44,9 +51,14 @@ excludes = [
     "pydoc",
     "doctest",
     "email.test",
-    "PIL",
     "numpy",
     "discord",  # phase 5 -- not wired up yet, no need to ship it
+    # PIL is deliberately NOT excluded: pystray needs it to build the tray icon.
+    # Only the two image modules below are reachable, so the rest is trimmed via
+    # PIL.ImageShow etc. staying unimported rather than by excluding the package.
+    "PIL.ImageQt",
+    "PIL.ImageTk",
+    "PIL.ImageShow",
 ]
 
 a = Analysis(

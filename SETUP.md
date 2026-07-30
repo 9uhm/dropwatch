@@ -175,6 +175,29 @@ dropwatch logout
 dropwatch login
 ```
 
+### It says "nothing is answering" after `--detach`
+
+The background copy started but its dashboard never came up — almost always because
+something already holds the port. `--detach` checks before claiming success, since a
+windowless process has nowhere to print the error. Run `dropwatch stop`, then plain
+`dropwatch serve` in a visible window to see the actual message.
+
+### The tray icon doesn't appear
+
+The log will say `tray unavailable`. It's optional and the watcher runs regardless,
+but a detached run then has no controls except `dropwatch stop`. Check that
+`ui.tray` is `true` and that `--no-tray` wasn't passed. On Windows the icon may be
+hidden in the notification-area overflow — click the chevron next to the clock.
+
+### Settings won't save from the dashboard
+
+- A red message under the control means the value was out of range; it states the
+  limit.
+- `403` means the write was rejected as cross-site, or the key isn't editable from
+  the page. `ui.host` and `ui.port` are intentionally CLI-only, because a bad value
+  there would leave the dashboard unreachable. Use
+  `dropwatch config set ui.port 9000`.
+
 ### `Could not bind 127.0.0.1:8787`
 
 Something is already on that port — usually a copy of the bot you forgot about.

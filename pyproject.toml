@@ -12,6 +12,10 @@ dependencies = [
     "discord.py>=2.4",
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
+    # System-tray icon. Optional at runtime — the app logs and carries on without
+    # it — but declared here because a detached run has no other way to be stopped.
+    "pystray>=0.19",
+    "pillow>=10.0",
 ]
 
 [project.optional-dependencies]

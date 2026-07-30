@@ -235,6 +235,55 @@ stops gating the mutation, auto-claim starts working with no code change.
 drift — Twitch emits a generic error alongside the challenge, and reporting that
 would send you hunting a field rename that doesn't exist.
 
+## Background running and the tray
+
+```bash
+dropwatch serve --detach     # runs with no console window; close the terminal freely
+dropwatch stop               # stop a detached run
+```
+
+`--detach` spawns a windowless copy and **waits for its dashboard to answer before
+reporting success** — otherwise a port conflict would look like a clean launch, since
+the detached process has nowhere to print its error.
+
+A **system-tray icon** is what makes that controllable: right-click for *Open
+dashboard*, *Open twitch.tv/&lt;channel&gt;*, *Pause* / *Resume*, and *Quit*. Its labels
+track the live state, so it shows the current target and whether watching is paused.
+Double-click opens the dashboard. Disable with `--no-tray` or `ui.tray = false` —
+though a detached run then has no controls except `dropwatch stop`.
+
+## Settings
+
+Persisted in `config.toml` and the database, so `serve` behaves the same however it's
+launched. Editable **from the dashboard** (right-hand *Settings* panel) or the CLI:
+
+```bash
+dropwatch config set ui.open_twitch true      # open the channel when one is picked
+dropwatch config set ui.open_dashboard true   # open the dashboard on start
+dropwatch config set liveness.grace_period 120
+dropwatch config unset liveness.grace_period  # back to the file default
+```
+
+| Setting | Does |
+| --- | --- |
+| `ui.open_dashboard` | Open the dashboard when watching starts |
+| `ui.open_twitch` | Open the channel's Twitch page when a target is picked |
+| `ui.reopen_twitch_on_rotate` | Re-open on every rotation, not just the first |
+| `ui.tray` | Show the tray icon |
+| `ui.host` / `ui.port` | Where the dashboard listens (CLI only — see below) |
+
+Opening Twitch is purely so you can *watch* the stream; crediting comes from
+telemetry either way, and the browser plays no part in it.
+
+The dashboard's settings panel writes through an allowlist, and `ui.host`/`ui.port`
+are deliberately **not** on it: they need a restart to take effect, and a bad value
+entered there would make the dashboard unreachable. Set those in `config.toml` or via
+`config set`. Writes require a custom header, so another site open in your browser
+can't drive the unauthenticated local endpoint.
+
+CLI flags still win for a single run: `--host`, `--port`, `--open`, `--open-twitch`,
+`--no-open-twitch`, `--no-tray`.
+
 ## Live dashboard
 
 ```bash

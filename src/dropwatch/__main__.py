@@ -26,8 +26,20 @@ import time
 
 from . import __version__, paths
 from .app import App
-from .config import ConfigError, parse_override_value
+from .config import ConfigError, ConfigManager, parse_override_value
+from .desktop import (
+    Tray,
+    clear_pid,
+    detach_and_exit,
+    open_channel,
+    open_url,
+    process_alive,
+    read_pid,
+    terminate,
+    write_pid,
+)
 from .events import Event, EventType
+from .store import Store
 from .twitch.auth import AuthError, AuthNeededError, TokenSet
 from .twitch.drops import SessionProgress
 from .twitch.gql import GQLError, PersistedQueryNotFound
@@ -691,14 +703,23 @@ async def cmd_serve(args: argparse.Namespace) -> int:
             print("Stored token has no user id — re-run `dropwatch login`.", file=sys.stderr)
             return EXIT_ERROR
 
+        ui = app.config.ui
+        # A CLI flag overrides the persisted setting, but only for this run.
+        host = args.host or ui.host
+        port = args.port or ui.port
+        open_dashboard = ui.open_dashboard or args.open
+        open_twitch = ui.open_twitch if args.open_twitch is None else args.open_twitch
+        want_tray = ui.tray and not args.no_tray
+
         dashboard = Dashboard(
-            watcher=app.watcher, bus=app.bus, store=app.store, drops=app.drops
+            watcher=app.watcher, bus=app.bus, store=app.store, drops=app.drops,
+            config=app.config_manager,
         )
         try:
-            url = await dashboard.start(args.host, args.port)
+            url = await dashboard.start(host, port)
         except OSError as exc:
-            print(f"Could not bind {args.host}:{args.port} — {exc}\n"
-                  f"Another instance may already be running; try --port.",
+            print(f"Could not bind {host}:{port} — {exc}\n"
+                  "Another instance may already be running; try --port.",
                   file=sys.stderr)
             return EXIT_ERROR
 
@@ -707,12 +728,51 @@ async def cmd_serve(args: argparse.Namespace) -> int:
         print("  Targets    " + (", ".join(
             f"{c.login}({c.priority})" for c in app.config.watch.ordered()
         ) or "none configured"))
+
+        # Open on every target pick rather than once at startup: after a rotation
+        # the old tab is showing a stream that has ended.
+        opened_once = False
+
+        async def on_watch_started(event: Event) -> None:
+            nonlocal opened_once
+            channel = event.get("channel")
+            if not channel or not open_twitch:
+                return
+            if opened_once and not app.config.ui.reopen_twitch_on_rotate:
+                return
+            opened_once = True
+            open_channel(str(channel))
+
+        app.bus.subscribe(on_watch_started, EventType.WATCH_STARTED)
+
+        tray: Tray | None = None
+        if want_tray:
+            tray = Tray(
+                loop=asyncio.get_running_loop(),
+                dashboard_url=url,
+                on_pause=app.watcher.pause,
+                on_resume=app.watcher.resume,
+                on_quit=app.watcher.stop,
+                current_channel=lambda: app.watcher.status().channel,
+                is_paused=lambda: app.watcher.status().paused,
+            )
+            if tray.start():
+                # Keep the menu labels truthful as target and state change.
+                app.bus.subscribe(
+                    lambda _e: tray.refresh() if tray else None,
+                    EventType.WATCH_STARTED, EventType.TARGET_SWITCHED,
+                    EventType.STATE_CHANGED, EventType.WATCH_STOPPED,
+                )
+                print("  Tray       active — right-click the icon to pause or quit")
+            else:
+                tray = None
+
         print("\n  Ctrl-C to stop.\n")
 
-        if args.open:
-            import webbrowser
-            webbrowser.open(url)
+        if open_dashboard:
+            open_url(url, what="dashboard")
 
+        write_pid()
         task = asyncio.create_task(app.watcher.run(), name="watcher")
         try:
             if args.duration:
@@ -726,7 +786,10 @@ async def cmd_serve(args: argparse.Namespace) -> int:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         finally:
+            if tray is not None:
+                tray.stop()
             await dashboard.stop()
+            clear_pid()
 
         s = app.watcher.status()
         print(f"\n  {s.stats.cycles} cycle(s), {s.stats.minutes_sent} minute(s) reported, "
@@ -736,6 +799,26 @@ async def cmd_serve(args: argparse.Namespace) -> int:
             print(f"  Twitch credited {gain:+d} minute(s) "
                   f"({s.stats.credited_start} -> {s.stats.credited_now}).")
         return EXIT_OK
+
+
+async def cmd_stop(_: argparse.Namespace) -> int:
+    """Stop a detached background run."""
+    pid = read_pid()
+    if pid is None:
+        print("No recorded background process. Nothing to stop.")
+        return EXIT_OK
+    if not process_alive(pid):
+        # Distinguish a stale file from a live process, or the next `serve` would
+        # look like it was already running.
+        clear_pid()
+        print(f"Process {pid} is no longer running; cleared the stale record.")
+        return EXIT_OK
+    if terminate(pid):
+        clear_pid()
+        print(f"Stopped background process {pid}.")
+        return EXIT_OK
+    print(f"Could not stop process {pid}. Try Task Manager.", file=sys.stderr)
+    return EXIT_ERROR
 
 
 async def cmd_status(_: argparse.Namespace) -> int:
@@ -868,13 +951,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve = sub.add_parser(
         "serve", help="run the watcher with a live web dashboard on localhost"
     )
-    p_serve.add_argument("--host", default="127.0.0.1",
-                         help="bind address (default localhost only)")
-    p_serve.add_argument("--port", type=int, default=8787)
+    p_serve.add_argument("--host", default=None,
+                         help="bind address; overrides ui.host for this run")
+    p_serve.add_argument("--port", type=int, default=None,
+                         help="overrides ui.port for this run")
     p_serve.add_argument("--duration", type=float, default=0,
                          help="stop after N seconds (0 = run until Ctrl-C)")
-    p_serve.add_argument("--open", action="store_true", help="open a browser")
+    p_serve.add_argument("--open", action="store_true",
+                         help="open the dashboard, regardless of ui.open_dashboard")
+    p_serve.add_argument("--open-twitch", dest="open_twitch", action="store_true",
+                         default=None, help="open the channel on Twitch when picked")
+    p_serve.add_argument("--no-open-twitch", dest="open_twitch", action="store_false",
+                         help="never open Twitch, regardless of ui.open_twitch")
+    p_serve.add_argument("--no-tray", action="store_true",
+                         help="run without a tray icon")
+    p_serve.add_argument("--detach", action="store_true",
+                         help="run in the background with no console window")
     p_serve.set_defaults(func=cmd_serve)
+
+    sub.add_parser(
+        "stop", help="stop a detached background run"
+    ).set_defaults(func=cmd_stop)
 
     sub.add_parser(
         "status", help="show recorded sessions and state transitions"
@@ -886,6 +983,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_events.set_defaults(func=cmd_events)
 
     return parser
+
+
+async def _resolve_bind(args: argparse.Namespace) -> tuple[str, int]:
+    """Where the detached child will listen, honouring every config layer."""
+    store = await Store().open()
+    try:
+        ui = (await ConfigManager(store).load()).current.ui
+    finally:
+        await store.close()
+    return args.host or ui.host, args.port or ui.port
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -901,7 +1008,23 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, OSError):
             pass
 
+    raw = list(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(argv)
+
+    # Handled before the event loop exists: detaching means spawning a fresh
+    # process and exiting, so there's nothing for this one to run.
+    if getattr(args, "detach", False):
+        existing = read_pid()
+        if existing is not None and process_alive(existing):
+            print(f"Already running in the background (pid {existing}).\n"
+                  "Stop it first with `dropwatch stop`.", file=sys.stderr)
+            return EXIT_ERROR
+        # The child resolves ui.host/ui.port the same way this does, so the parent
+        # has to load the full three-layer config — a database override of the port
+        # would otherwise be missed and we'd poll the wrong address.
+        host, port = asyncio.run(_resolve_bind(args))
+        return detach_and_exit(raw, host=host, port=port)
+
     try:
         return asyncio.run(args.func(args))
     except KeyboardInterrupt:

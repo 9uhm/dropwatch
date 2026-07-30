@@ -118,6 +118,30 @@ class DiscordConfig(BaseModel):
         return bool(self.owner_id)
 
 
+class UIConfig(BaseModel):
+    """Dashboard, browser and tray behaviour.
+
+    These are persisted so ``serve`` behaves the same whether it's launched from a
+    shell, a shortcut, or the tray — a CLI flag that has to be remembered every
+    time isn't a setting, it's a chore.
+    """
+
+    #: Bind address. Left at localhost by default: the dashboard has no
+    #: authentication, so exposing it to a network is an explicit decision.
+    host: str = "127.0.0.1"
+    port: int = Field(8787, ge=1, le=65535)
+
+    #: Open the dashboard in a browser when the watcher starts.
+    open_dashboard: bool = False
+    #: Open the watched channel's Twitch page when a target is picked.
+    open_twitch: bool = False
+    #: Re-open Twitch on every rotation, not just the first target. Off by
+    #: default — an unattended overnight run would otherwise bury you in tabs.
+    reopen_twitch_on_rotate: bool = False
+    #: Show a system-tray icon. This is what makes a detached run controllable.
+    tray: bool = True
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
     history_size: int = Field(200, ge=10, le=5000)
@@ -130,6 +154,7 @@ class AppConfig(BaseModel):
     liveness: LivenessConfig = Field(default_factory=LivenessConfig)
     twitch: TwitchConfig = Field(default_factory=TwitchConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
 
@@ -169,6 +194,7 @@ class _FileSettings(BaseSettings):
     liveness: LivenessConfig = Field(default_factory=LivenessConfig)
     twitch: TwitchConfig = Field(default_factory=TwitchConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     @classmethod

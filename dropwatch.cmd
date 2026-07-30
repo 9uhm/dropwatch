@@ -27,6 +27,8 @@ echo   ============
 echo.
 echo     1.  Start watching  (opens the dashboard)
 echo     2.  Start watching  (no browser)
+echo     8.  Start in background (tray icon, closes this window)
+echo     9.  Stop background run
 echo     3.  Log in to Twitch
 echo     4.  Check setup     (doctor)
 echo     5.  Show history    (sessions and transitions)
@@ -44,6 +46,8 @@ if /i "%choice%"=="4" goto doctor
 if /i "%choice%"=="5" goto status
 if /i "%choice%"=="6" goto gqlcheck
 if /i "%choice%"=="7" goto whoami
+if /i "%choice%"=="8" goto detach
+if /i "%choice%"=="9" goto stopbg
 if /i "%choice%"=="q" exit /b 0
 goto menu
 
@@ -85,6 +89,20 @@ goto done
 :whoami
 cls
 "%PY%" -m dropwatch whoami
+goto done
+
+:detach
+cls
+"%PY%" -m dropwatch serve --detach
+echo.
+echo   Look for the tray icon near the clock to pause or quit.
+echo.
+pause
+exit /b 0
+
+:stopbg
+cls
+"%PY%" -m dropwatch stop
 goto done
 
 :done

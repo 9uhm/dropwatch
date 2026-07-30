@@ -49,6 +49,8 @@ CONFIG_FILE = ROOT / "config.toml"
 ENV_FILE = ROOT / ".env"
 DB_PATH = DATA_DIR / "dropwatch.db"
 TOKEN_PATH = DATA_DIR / "tokens.json"
+#: Written by a detached run so `dropwatch stop` can find it again.
+PID_FILE = DATA_DIR / "dropwatch.pid"
 
 
 def ui_file(name: str) -> Path:

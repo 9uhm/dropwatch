@@ -80,6 +80,28 @@ gql_max_retries = 3
 gql_backoff_base = 0.5
 gql_backoff_max = 20.0
 
+[ui]
+# Dashboard bind address and port. Localhost only by default: the dashboard has
+# no authentication, so exposing it to a network should be a deliberate choice.
+host = "127.0.0.1"
+port = 8787
+
+# Open the dashboard in a browser when `serve` starts.
+open_dashboard = false
+
+# Open the watched channel's Twitch page when a target is picked. Note this does
+# not make the bot watch through the browser -- crediting comes from telemetry
+# either way. It's for when you want to actually see the stream.
+open_twitch = false
+
+# Re-open Twitch on every rotation rather than only the first target. Off by
+# default; an unattended overnight run would otherwise bury you in tabs.
+reopen_twitch_on_rotate = false
+
+# Show a system-tray icon. Keep this on if you use `serve --detach`, since the
+# tray is how a background run gets paused or stopped without the CLI.
+tray = true
+
 [discord]
 # Fill these in for phase 5. `owner_id` gates every mutating command.
 owner_id = 0

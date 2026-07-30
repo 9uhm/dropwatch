@@ -24,10 +24,13 @@ from typing import TYPE_CHECKING, Any
 from aiohttp import web
 
 from . import __version__, paths
+from .config import ConfigError
+from .desktop import open_channel
 from .events import Event, EventType
 from .log import get_logger
 
 if TYPE_CHECKING:
+    from .config import ConfigManager
     from .events import EventBus
     from .store import Store
     from .twitch.drops import DropsClient
@@ -88,11 +91,13 @@ class Dashboard:
         bus: EventBus,
         store: Store,
         drops: DropsClient,
+        config: ConfigManager,
         page: Any = None,
     ) -> None:
         self._watcher = watcher
         self._bus = bus
         self._store = store
+        self._config = config
         self._drops_client = drops
         self._drops_cache: dict[str, Any] | None = None
         self._drops_at = 0.0
@@ -151,6 +156,9 @@ class Dashboard:
             web.get("/api/history", self._history),
             web.get("/api/drops", self._drops),
             web.get("/api/stats", self._stats),
+            web.get("/api/settings", self._settings_get),
+            web.post("/api/settings", self._settings_set),
+            web.post("/api/control", self._control),
             web.get("/api/events", self._events),
             web.get("/ui/{name}", self._asset),
         ])
@@ -245,6 +253,128 @@ class Dashboard:
             ],
             "sessions": [dict(s) for s in sessions],
         })
+
+    #: Keys the dashboard may write, with enough metadata to render a control.
+    #:
+    #: An allowlist rather than "anything ConfigManager accepts": the server has no
+    #: authentication, so the blast radius of the write endpoint should be the
+    #: settings a person would actually toggle. ``ui.host``/``ui.port`` are
+    #: deliberately excluded — changing them needs a restart to take effect, and a
+    #: bad value entered from the dashboard would make the dashboard unreachable.
+    SETTINGS: tuple[dict[str, Any], ...] = (
+        {"key": "ui.open_dashboard", "type": "bool", "group": "Startup",
+         "label": "Open the dashboard when watching starts"},
+        {"key": "ui.open_twitch", "type": "bool", "group": "Startup",
+         "label": "Open the channel on Twitch when a target is picked"},
+        {"key": "ui.reopen_twitch_on_rotate", "type": "bool", "group": "Startup",
+         "label": "Re-open Twitch on every rotation",
+         "hint": "Off by default — an overnight run would bury you in tabs"},
+        {"key": "ui.tray", "type": "bool", "group": "Startup",
+         "label": "Show a system-tray icon", "hint": "Restart to apply"},
+
+        {"key": "watch.auto_discovery", "type": "bool", "group": "Watching",
+         "label": "Fall back to auto-discovery when no listed channel is live"},
+        {"key": "watch.auto_claim", "type": "bool", "group": "Watching",
+         "label": "Attempt to claim earned rewards",
+         "hint": "Twitch blocks this; earned rewards are still announced"},
+        {"key": "watch.minute_watched_interval", "type": "number", "group": "Watching",
+         "label": "Telemetry interval", "unit": "s", "min": 10, "max": 300, "step": 1},
+        {"key": "watch.progress_check_every", "type": "number", "group": "Watching",
+         "label": "Read progress every N cycles", "min": 1, "max": 60, "step": 1},
+        {"key": "watch.idle_poll_interval", "type": "number", "group": "Watching",
+         "label": "Idle re-check interval", "unit": "s", "min": 30, "max": 3600, "step": 30},
+
+        {"key": "liveness.grace_period", "type": "number", "group": "Stream-end detection",
+         "label": "Grace period", "unit": "s", "min": 0, "max": 600, "step": 10,
+         "hint": "How long a suspected offline stream is held before rotating"},
+        {"key": "liveness.confirm_reads", "type": "number", "group": "Stream-end detection",
+         "label": "Confirmations required", "min": 1, "max": 10, "step": 1},
+        {"key": "liveness.stall_cycles", "type": "number", "group": "Stream-end detection",
+         "label": "Zero-progress checks before STALLED", "min": 1, "max": 20, "step": 1},
+        {"key": "liveness.stream_poll_interval", "type": "number",
+         "group": "Stream-end detection",
+         "label": "Stream poll interval", "unit": "s", "min": 10, "max": 600, "step": 10},
+
+        {"key": "logging.level", "type": "choice", "group": "Diagnostics",
+         "label": "Log level", "choices": ["DEBUG", "INFO", "WARNING", "ERROR"]},
+    )
+
+    def _guard(self, request: web.Request) -> None:
+        """Reject cross-site writes.
+
+        The dashboard is unauthenticated on localhost, which means any page in the
+        browser could otherwise POST to it. Requiring a custom header forces a CORS
+        preflight that we never answer, so a cross-origin write can't get through —
+        while same-origin fetch from our own page passes trivially.
+        """
+        if request.headers.get("X-Dropwatch") != "1":
+            raise web.HTTPForbidden(reason="missing X-Dropwatch header")
+        origin = request.headers.get("Origin")
+        if origin and request.host and request.host not in origin:
+            raise web.HTTPForbidden(reason="cross-origin write rejected")
+
+    async def _settings_get(self, _: web.Request) -> web.StreamResponse:
+        flat = self._config.flat()
+        overrides = self._config.overrides
+        return web.json_response({
+            "settings": [
+                {**spec, "value": flat.get(spec["key"]),
+                 "overridden": spec["key"] in overrides}
+                for spec in self.SETTINGS
+            ],
+            "groups": list(dict.fromkeys(s["group"] for s in self.SETTINGS)),
+        })
+
+    async def _settings_set(self, request: web.Request) -> web.StreamResponse:
+        self._guard(request)
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001
+            raise web.HTTPBadRequest(reason="body must be JSON") from None
+
+        key = payload.get("key")
+        allowed = {s["key"] for s in self.SETTINGS}
+        if key not in allowed:
+            raise web.HTTPForbidden(reason=f"{key!r} is not editable from the dashboard")
+
+        try:
+            if payload.get("reset"):
+                await self._config.clear_override(key)
+            else:
+                await self._config.set_override(key, payload.get("value"))
+        except ConfigError as exc:
+            # A rejected value is the user's mistake, not a server fault — report it
+            # so the page can show the reason inline.
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+        flat = self._config.flat()
+        log.info("setting changed from dashboard: %s = %r", key, flat.get(key))
+        return web.json_response({
+            "ok": True, "key": key, "value": flat.get(key),
+            "overridden": key in self._config.overrides,
+        })
+
+    async def _control(self, request: web.Request) -> web.StreamResponse:
+        """Pause, resume, rotate, or open a window — the tray menu over HTTP."""
+        self._guard(request)
+        try:
+            action = (await request.json()).get("action")
+        except Exception:  # noqa: BLE001
+            raise web.HTTPBadRequest(reason="body must be JSON") from None
+
+        if action == "pause":
+            await self._watcher.pause()
+        elif action == "resume":
+            await self._watcher.resume()
+        elif action == "open_twitch":
+            channel = self._watcher.status().channel
+            if not channel:
+                return web.json_response({"ok": False, "error": "no current target"})
+            open_channel(channel)
+        else:
+            raise web.HTTPBadRequest(reason=f"unknown action {action!r}")
+
+        return web.json_response({"ok": True, "state": self._watcher.status().state})
 
     async def _stats(self, request: web.Request) -> web.StreamResponse:
         """Series and aggregates for the charts."""

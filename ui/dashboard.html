@@ -296,6 +296,58 @@
   .viz-tip .tip-r b { margin-left: auto; font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .viz-tip .tip-s { margin-top: 4px; font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
 
+  /* ---------------------------------------------------------------- settings */
+  .set-group { border-bottom: 1px solid var(--line); }
+  .set-group:last-child { border-bottom: 0; }
+  .set-group > h4 {
+    margin: 0; padding: 9px 13px 5px;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .11em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500;
+  }
+  .set {
+    display: grid; grid-template-columns: 1fr auto; gap: 10px;
+    align-items: center; padding: 7px 13px 8px;
+  }
+  .set:hover { background: #FFFFFF04; }
+  .set .lbl { font-size: 12.5px; color: var(--text-dim); }
+  .set .hint { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .set.dirty .lbl { color: var(--text); }
+  .set .ov {
+    font-family: var(--mono); font-size: 8.5px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--accent);
+    border: 1px solid var(--accent-dim, #6D45A8); border-radius: 100px;
+    padding: 1px 6px; margin-left: 7px; vertical-align: middle;
+  }
+  .set .err { font-size: 11px; color: var(--crit); margin-top: 3px; }
+
+  /* switch */
+  .sw-btn {
+    position: relative; width: 38px; height: 21px; flex: none;
+    border-radius: 100px; border: 1px solid var(--line-2);
+    background: var(--surface-3); cursor: pointer; padding: 0;
+    transition: background .16s, border-color .16s;
+  }
+  .sw-btn::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: var(--muted); transition: transform .16s, background .16s;
+  }
+  .sw-btn[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+  .sw-btn[aria-checked="true"]::after { transform: translateX(17px); background: #fff; }
+  @media (prefers-reduced-motion: reduce) {
+    .sw-btn, .sw-btn::after { transition: none; }
+  }
+
+  .set input[type="number"], .set select {
+    font-family: var(--mono); font-size: 11.5px; width: 96px;
+    background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--line-2); border-radius: var(--r-sm);
+    padding: 4px 7px; text-align: right;
+  }
+  .set select { text-align: left; width: 110px; }
+  .set .unit { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-left: 5px; }
+  .set .ctl { display: flex; align-items: center; }
+
   .empty { padding: 20px 13px; text-align: center; color: var(--muted); font-size: 12px; }
   .note {
     margin-top: 18px; padding: 11px 14px; border: 1px solid var(--line);
@@ -358,6 +410,21 @@
           <thead><tr><th style="width:30px">ID</th><th>Signal</th><th style="width:84px">Vote</th></tr></thead>
           <tbody id="sigRows"><tr><td colspan="3" class="empty">no reading yet</td></tr></tbody>
         </table>
+      </section>
+
+      <section class="card">
+        <div class="head">
+          <span class="eyebrow">Controls</span>
+          <div class="toolbar">
+            <button id="btnPauseResume">Pause</button>
+            <button id="btnOpenTwitch">Open Twitch</button>
+          </div>
+        </div>
+        <div class="head" style="border-bottom:0;padding-top:2px">
+          <span class="eyebrow">Settings</span>
+          <span id="setStatus" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
+        </div>
+        <div id="settings"><div class="empty">Loading…</div></div>
       </section>
 
       <section class="card">
@@ -480,6 +547,8 @@
         ? "—"
         : `${st.credited_now}` + (st.credited_gain ? ` <span class="up">+${st.credited_gain}</span>` : "");
     $("pubsub").textContent = "pubsub " + (s.pubsub_connected ? "up" : "down");
+    $("btnPauseResume").textContent = state === "PAUSED" ? "Resume" : "Pause";
+    $("btnPauseResume").classList.toggle("on", state === "PAUSED");
 
     const sig = s.signals || {};
     const ids = Object.keys(sig);
@@ -654,8 +723,120 @@
     else if (atBottom && !follow) { follow = true; $("btnFollow").classList.add("on"); }
   });
 
+  // ---------------------------------------------------------------- settings
+  // Every write carries X-Dropwatch, which the server requires. A cross-site page
+  // cannot set a custom header without a CORS preflight the server never answers,
+  // so this is what keeps an unauthenticated localhost endpoint from being driven
+  // by any other tab you happen to have open.
+  const post = (path, body) => fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Dropwatch": "1" },
+    body: JSON.stringify(body),
+  });
+
+  let settingsCache = [];
+
+  async function pollSettings() {
+    try {
+      const r = await fetch("/api/settings");
+      if (!r.ok) return;
+      const d = await r.json();
+      settingsCache = d.settings || [];
+      renderSettings(d);
+    } catch { /* non-critical */ }
+  }
+
+  function renderSettings(d) {
+    const host = $("settings");
+    if (!settingsCache.length) {
+      host.innerHTML = `<div class="empty">No editable settings.</div>`;
+      return;
+    }
+    host.innerHTML = (d.groups || []).map((group) => {
+      const rows = settingsCache.filter((s) => s.group === group).map((s) => {
+        const ov = s.overridden ? `<span class="ov" title="Changed from the file default">set</span>` : "";
+        const hint = s.hint ? `<div class="hint">${esc(s.hint)}</div>` : "";
+        let ctl;
+        if (s.type === "bool") {
+          ctl = `<button class="sw-btn" role="switch" data-key="${esc(s.key)}"
+                   aria-checked="${s.value ? "true" : "false"}"
+                   aria-label="${esc(s.label)}"></button>`;
+        } else if (s.type === "choice") {
+          ctl = `<select data-key="${esc(s.key)}">${(s.choices || []).map((c) =>
+            `<option value="${esc(c)}"${c === s.value ? " selected" : ""}>${esc(c)}</option>`
+          ).join("")}</select>`;
+        } else {
+          ctl = `<input type="number" data-key="${esc(s.key)}" value="${esc(s.value)}"
+                   min="${esc(s.min ?? "")}" max="${esc(s.max ?? "")}"
+                   step="${esc(s.step ?? 1)}" />` +
+                (s.unit ? `<span class="unit">${esc(s.unit)}</span>` : "");
+        }
+        return `<div class="set" data-row="${esc(s.key)}">
+          <div><div class="lbl">${esc(s.label)}${ov}</div>${hint}</div>
+          <div class="ctl">${ctl}</div>
+        </div>`;
+      }).join("");
+      return `<div class="set-group"><h4>${esc(group)}</h4>${rows}</div>`;
+    }).join("");
+  }
+
+  async function saveSetting(key, value) {
+    const row = document.querySelector(`[data-row="${key}"]`);
+    row?.querySelector(".err")?.remove();
+    $("setStatus").textContent = "saving…";
+    try {
+      const r = await post("/api/settings", { key, value });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) {
+        // Surface the server's reason inline rather than a generic failure —
+        // it's usually an out-of-range value, and the message says which.
+        const msg = d.error || `${r.status} ${r.statusText}`;
+        row?.querySelector("div")?.insertAdjacentHTML("beforeend",
+          `<div class="err">${esc(msg)}</div>`);
+        $("setStatus").textContent = "not saved";
+        return false;
+      }
+      $("setStatus").textContent = "saved";
+      setTimeout(() => { if ($("setStatus").textContent === "saved") $("setStatus").textContent = ""; }, 1800);
+      pollSettings();
+      return true;
+    } catch (e) {
+      $("setStatus").textContent = "not saved";
+      return false;
+    }
+  }
+
+  $("settings").addEventListener("click", (ev) => {
+    const sw = ev.target.closest(".sw-btn");
+    if (!sw) return;
+    const next = sw.getAttribute("aria-checked") !== "true";
+    sw.setAttribute("aria-checked", next ? "true" : "false");   // optimistic
+    saveSetting(sw.dataset.key, next).then((ok) => {
+      if (!ok) sw.setAttribute("aria-checked", next ? "false" : "true");
+    });
+  });
+  $("settings").addEventListener("change", (ev) => {
+    const el = ev.target;
+    if (el.matches('input[type="number"]')) {
+      const n = Number(el.value);
+      if (Number.isFinite(n)) saveSetting(el.dataset.key, n);
+    } else if (el.matches("select")) {
+      saveSetting(el.dataset.key, el.value);
+    }
+  });
+
+  // ---------------------------------------------------------------- controls
+  $("btnPauseResume").addEventListener("click", async () => {
+    const paused = $("stateName").textContent === "PAUSED";
+    await post("/api/control", { action: paused ? "resume" : "pause" });
+    pollState();
+  });
+  $("btnOpenTwitch").addEventListener("click", () => {
+    post("/api/control", { action: "open_twitch" });
+  });
+
   connect();
-  pollState(); pollDrops(); pollHistory();
+  pollState(); pollDrops(); pollHistory(); pollSettings();
   setInterval(pollState, 2000);
   setInterval(pollDrops, 30000);
   setInterval(pollHistory, 20000);
