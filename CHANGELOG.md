@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.1
+
+Fixes the background run opening a console window.
+
+`DETACHED_PROCESS` and `CREATE_NO_WINDOW` are mutually exclusive on Win32, and
+passing both let `DETACHED_PROCESS` win — which means "do not inherit the parent's
+console", so a console-subsystem binary allocated a brand new one. The supposedly
+headless run popped up an empty black window. `CREATE_NO_WINDOW` alone gives a
+console with no window, which is what headless has to mean.
+
+Verified against the packaged exe: `MainWindowHandle` is 0, no titled window
+exists, and it keeps serving after its launching shell exits.
+
+Also adds `help` as a subcommand — argparse only offers `--help`, so `dropwatch
+help` failed with an invalid-choice error.
+
 ## v0.2.0
 
 Background running, a system tray, and settings that persist.
