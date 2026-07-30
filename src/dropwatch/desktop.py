@@ -64,10 +64,19 @@ def detach_and_exit(argv: list[str], *, host: str, port: int) -> int:
         log.error("--detach is implemented for Windows only")
         return 1
 
+    # CREATE_NO_WINDOW *only* — deliberately not DETACHED_PROCESS.
+    #
+    # Win32 treats those two as mutually exclusive, and when both are passed
+    # DETACHED_PROCESS wins. That means "do not inherit the parent's console",
+    # which makes a console-subsystem binary allocate a brand new console — so the
+    # supposedly headless child pops up an empty black window. CREATE_NO_WINDOW
+    # gives it a console with no window at all, which is what headless means here.
+    #
+    # CREATE_NEW_PROCESS_GROUP keeps a Ctrl-C in the launching window from also
+    # reaching the background copy.
     creationflags = (
-        getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-        | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
     )
 
     command = _relaunch_command(argv)

@@ -801,6 +801,12 @@ async def cmd_serve(args: argparse.Namespace) -> int:
         return EXIT_OK
 
 
+async def cmd_help(_: argparse.Namespace) -> int:
+    """`help` as a subcommand, because that is what people type first."""
+    build_parser().print_help()
+    return EXIT_OK
+
+
 async def cmd_stop(_: argparse.Namespace) -> int:
     """Stop a detached background run."""
     pid = read_pid()
@@ -972,6 +978,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "stop", help="stop a detached background run"
     ).set_defaults(func=cmd_stop)
+
+    sub.add_parser("help", help="show this help").set_defaults(func=cmd_help)
 
     sub.add_parser(
         "status", help="show recorded sessions and state transitions"
