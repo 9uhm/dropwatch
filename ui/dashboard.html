@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dropwatch — live</title>
+<style>
+  /* ------------------------------------------------------------------ theme
+     Committed dark. The bot runs unattended on a second monitor for hours, so
+     the ground is near-black with a blue bias and the only saturated colour is
+     reserved for two things that actually matter: a claimable reward (gold) and
+     a fault (red). Everything else is greyscale so those two read instantly. */
+  :root {
+    --bg: #07090E;
+    --bg-2: #0A0E15;
+    --surface: #0E131C;
+    --surface-2: #141A25;
+    --surface-3: #1B2230;
+    --line: #1C2431;
+    --line-2: #26303F;
+    --text: #E8ECF4;
+    --text-dim: #9AA7BA;
+    --muted: #667689;
+    --faint: #47556680;
+
+    --accent: #9D7BFF;
+    --accent-2: #C4AEFF;
+    --accent-wash: #9D7BFF14;
+    --gold: #FFC15E;
+    --gold-2: #FFD79A;
+    --gold-wash: #FFC15E12;
+    --ok: #43D69A;
+    --ok-wash: #43D69A12;
+    --crit: #FF6169;
+    --crit-wash: #FF616912;
+
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, Menlo, monospace;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --r: 9px;
+    --r-sm: 6px;
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 14px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(900px 500px at 12% -8%, #9D7BFF0A, transparent 70%),
+      radial-gradient(700px 400px at 92% 0%, #FFC15E08, transparent 70%);
+    background-attachment: fixed;
+  }
+  .wrap { max-width: 1300px; margin: 0 auto; padding: 20px 20px 48px; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500;
+  }
+
+  /* ----------------------------------------------------------------- header */
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding-bottom: 15px; margin-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 {
+    margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.005em;
+  }
+  header h1 span { color: var(--accent); }
+  header .v { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .conn {
+    margin-left: auto; display: flex; align-items: center; gap: 7px;
+    font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+    padding: 4px 10px; border: 1px solid var(--line); border-radius: 100px;
+    background: var(--surface);
+  }
+  .conn .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .conn.live .dot { background: var(--ok); box-shadow: 0 0 0 3px #43D69A22; animation: pulse 2.4s ease-in-out infinite; }
+  .conn.dead .dot { background: var(--crit); box-shadow: 0 0 0 3px #FF616922; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  @media (prefers-reduced-motion: reduce) { .conn.live .dot { animation: none } }
+
+  /* ------------------------------------------------------------------ layout */
+  .grid { display: grid; grid-template-columns: minmax(0,1fr) 340px; gap: 16px; align-items: start; }
+  @media (max-width: 1060px) { .grid { grid-template-columns: 1fr; } }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+  .card {
+    background: linear-gradient(180deg, var(--surface) 0%, var(--bg-2) 100%);
+    border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: 0 1px 0 #FFFFFF06 inset, 0 12px 32px -20px #000C;
+    overflow: hidden;
+  }
+  .card > .head {
+    display: flex; align-items: center; gap: 9px; padding: 10px 13px;
+    border-bottom: 1px solid var(--line); background: #FFFFFF03;
+  }
+  .card > .head .eyebrow { margin-right: auto; }
+
+  /* ------------------------------------------------------------------- state */
+  .hero { padding: 16px; display: flex; flex-direction: column; gap: 15px; }
+  .hero-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .pill {
+    font-family: var(--mono); font-size: 13px; font-weight: 650; letter-spacing: .06em;
+    padding: 6px 13px; border-radius: 100px; border: 1px solid;
+    display: inline-flex; align-items: center; gap: 8px; text-transform: uppercase;
+  }
+  .pill .d { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .pill.s-watching { color: var(--ok); background: var(--ok-wash); border-color: #43D69A55; }
+  .pill.s-watching .d { animation: pulse 2.4s ease-in-out infinite; }
+  .pill.s-suspect  { color: var(--gold); background: var(--gold-wash); border-color: #FFC15E55; }
+  .pill.s-offline  { color: var(--crit); background: var(--crit-wash); border-color: #FF616955; }
+  .pill.s-stalled  { color: var(--gold); background: transparent; border: 1px dashed var(--gold); }
+  .pill.s-idle, .pill.s-paused, .pill.s-unknown {
+    color: var(--muted); background: var(--surface-2); border-color: var(--line-2);
+  }
+  @media (prefers-reduced-motion: reduce) { .pill.s-watching .d { animation: none } }
+
+  .tgt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .tgt .login { font-family: var(--mono); font-size: 15px; font-weight: 600; }
+  .tgt .why { font-size: 12px; color: var(--muted); }
+
+  .metrics { display: grid; grid-template-columns: repeat(4,1fr); gap: 1px; background: var(--line); border-radius: var(--r-sm); overflow: hidden; }
+  .metric { background: var(--surface-2); padding: 10px 12px; display: flex; flex-direction: column; gap: 1px; }
+  .metric .k { font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .metric .v { font-family: var(--mono); font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .metric .v small { font-size: 11px; font-weight: 400; color: var(--muted); }
+  .metric .v .up { font-size: 11px; color: var(--ok); }
+  @media (max-width: 640px) { .metrics { grid-template-columns: repeat(2,1fr); } }
+
+  /* ----------------------------------------------------------------- rewards */
+  .claim-banner {
+    display: none; align-items: center; gap: 11px;
+    margin: 0 0 14px; padding: 11px 14px;
+    border: 1px solid #FFC15E4D; border-radius: var(--r);
+    background: linear-gradient(90deg, #FFC15E1A, #FFC15E08);
+  }
+  .claim-banner.on { display: flex; }
+  .claim-banner .big { font-family: var(--mono); font-size: 20px; font-weight: 700; color: var(--gold); }
+  .claim-banner .txt { font-size: 13px; color: var(--gold-2); }
+  .claim-banner .txt b { color: var(--text); }
+  .claim-banner a {
+    margin-left: auto; flex: none; font-size: 12px; font-weight: 600;
+    color: #1A1206; background: var(--gold); text-decoration: none;
+    padding: 6px 13px; border-radius: var(--r-sm); white-space: nowrap;
+  }
+  .claim-banner a:hover { background: var(--gold-2); }
+
+  .camp { border-bottom: 1px solid var(--line); }
+  .camp:last-child { border-bottom: 0; }
+  .camp-head {
+    display: flex; align-items: center; gap: 9px; padding: 11px 13px 9px;
+    flex-wrap: wrap;
+  }
+  .camp-head .nm { font-size: 13.5px; font-weight: 600; }
+  .camp-head .game { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .camp-head .left { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .camp-head .left.soon { color: var(--gold); }
+  .tag {
+    font-family: var(--mono); font-size: 9px; letter-spacing: .09em;
+    text-transform: uppercase; padding: 2px 7px; border-radius: 100px;
+    border: 1px solid var(--line-2); color: var(--muted);
+  }
+  .tag.ready { color: var(--gold); border-color: #FFC15E66; background: var(--gold-wash); }
+
+  .drop {
+    display: grid; grid-template-columns: 34px 1fr 118px;
+    gap: 11px; align-items: center; padding: 7px 13px 9px;
+  }
+  .drop:hover { background: #FFFFFF04; }
+  .drop .thumb {
+    width: 34px; height: 34px; border-radius: var(--r-sm);
+    background: var(--surface-3); border: 1px solid var(--line-2);
+    object-fit: contain; padding: 2px;
+  }
+  .drop .thumb.ph { display: grid; place-items: center; font-size: 13px; color: var(--faint); }
+  .drop .name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drop .sub { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .drop.is-claimable .name { color: var(--gold-2); font-weight: 600; }
+  .drop.is-claimed .name, .drop.is-claimed .sub { color: var(--muted); }
+
+  .track { height: 5px; background: var(--surface-3); border-radius: 100px; overflow: hidden; margin-top: 5px; }
+  .track > i { display: block; height: 100%; border-radius: 100px; background: var(--accent); transition: width .5s ease; }
+  .drop.is-claimable .track > i { background: linear-gradient(90deg, var(--gold), var(--gold-2)); }
+  .drop.is-claimed .track > i { background: var(--ok); opacity: .5; }
+  @media (prefers-reduced-motion: reduce) { .track > i { transition: none } }
+
+  .drop .right { text-align: right; font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .drop .right .mins { color: var(--text-dim); }
+  .drop .right .st { font-size: 9.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+  .drop.is-claimable .right .st { color: var(--gold); font-weight: 700; }
+  .drop.is-claimed .right .st { color: var(--ok); }
+
+  /* ----------------------------------------------------------------- signals */
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left; font-family: var(--mono); font-size: 9.5px; font-weight: 500;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+    padding: 9px 11px 7px; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 7px 11px; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  .sid { font-family: var(--mono); font-size: 11.5px; color: var(--accent); font-weight: 650; }
+  .sname { font-size: 12px; color: var(--text-dim); }
+  .vote {
+    display: inline-block; min-width: 68px; text-align: center;
+    font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: .07em;
+    padding: 3px 7px; border-radius: 100px; border: 1px solid;
+  }
+  .v-online   { color: var(--ok); background: var(--ok-wash); border-color: #43D69A4D; }
+  .v-offline  { color: var(--crit); background: var(--crit-wash); border-color: #FF61694D; }
+  .v-unknown  { color: var(--muted); border-color: var(--line-2); border-style: dashed; background: transparent; }
+  .v-degraded { color: var(--gold); border-color: #FFC15E4D; border-style: dotted; background: transparent; }
+
+  /* -------------------------------------------------------------------- feed */
+  .feed { max-height: 54vh; overflow-y: auto; font-family: var(--mono); font-size: 11px; }
+  .feed::-webkit-scrollbar { width: 9px; }
+  .feed::-webkit-scrollbar-track { background: transparent; }
+  .feed::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 100px; }
+  .feed::-webkit-scrollbar-thumb:hover { background: var(--line-2); }
+  .row {
+    display: grid; grid-template-columns: 62px 92px 1fr; gap: 10px;
+    padding: 3px 13px; border-left: 2px solid transparent; align-items: baseline;
+  }
+  .row:nth-child(odd) { background: #FFFFFF03; }
+  .row .t { color: var(--faint); font-variant-numeric: tabular-nums; }
+  .row .lbl { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  .row .msg { color: var(--text-dim); word-break: break-word; }
+  .row.k-transition { background: var(--accent-wash); border-left-color: var(--accent); }
+  .row.k-transition .lbl { color: var(--accent-2); font-weight: 700; }
+  .row.k-transition .msg { color: var(--text); }
+  .row.k-event .lbl { color: var(--accent); }
+  .row.lv-ok .lbl { color: var(--ok); }
+  .row.lv-warning { border-left-color: var(--gold); }
+  .row.lv-warning .lbl { color: var(--gold); }
+  .row.lv-error, .row.lv-critical { border-left-color: var(--crit); background: var(--crit-wash); }
+  .row.lv-error .lbl, .row.lv-critical .lbl { color: var(--crit); }
+  .row.lv-error .msg { color: var(--text); }
+
+  /* ---------------------------------------------------------------- controls */
+  .toolbar { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+  button {
+    font-family: var(--sans); font-size: 11px; font-weight: 500; color: var(--text-dim);
+    background: var(--surface-2); border: 1px solid var(--line-2);
+    border-radius: 100px; padding: 3px 10px; cursor: pointer;
+    transition: color .12s, background .12s, border-color .12s;
+  }
+  button:hover { color: var(--text); border-color: var(--accent); }
+  button.on { background: var(--accent); border-color: var(--accent); color: #0B0714; font-weight: 650; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ------------------------------------------------------------------- stats
+     Chart marks use their own stepped palette (see ui/stats.js) rather than the
+     UI status tokens: the bright tokens sit outside the dark lightness band. */
+  .stat-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 1px; background: var(--line); }
+  .stat { background: var(--surface-2); padding: 12px 14px; display: flex; flex-direction: column; gap: 1px; }
+  .stat .k { font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .stat .v { font-size: 26px; font-weight: 650; letter-spacing: -.02em; line-height: 1.1; }
+  .stat .v u { text-decoration: none; font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 2px; }
+  @media (max-width: 640px) { .stat-row { grid-template-columns: repeat(2,1fr); } }
+
+  .viz { padding: 12px 13px 6px; }
+  .viz-empty { padding: 26px 13px; text-align: center; color: var(--muted); font-size: 12px; line-height: 1.6; }
+  .viz-tick { fill: var(--muted); font-family: var(--mono); font-size: 9.5px; }
+  .viz-endlabel { fill: var(--text-dim); font-family: var(--mono); font-size: 10px; font-weight: 600; }
+
+  .viz-legend { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 0 13px 10px; }
+  .viz-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-dim); }
+  .viz-legend i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+
+  .viz-bar-row {
+    display: grid; grid-template-columns: 128px 1fr 62px; gap: 10px;
+    align-items: center; padding: 5px 13px;
+  }
+  .viz-bar-label { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-dim); }
+  .viz-bar-label .sw { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  .viz-bar-track { height: 8px; background: var(--surface-3); border-radius: 100px; overflow: hidden; }
+  .viz-bar-track > i { display: block; height: 100%; border-radius: 100px; }
+  .viz-bar-val { font-family: var(--mono); font-size: 11px; text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+  .viz-tablewrap { overflow-x: auto; max-height: 260px; overflow-y: auto; }
+  .viz-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 10.5px; }
+  .viz-table th { position: sticky; top: 0; background: var(--surface-2); z-index: 1; }
+  .viz-table td { padding: 4px 9px; border-bottom: 1px solid var(--line); color: var(--text-dim); }
+
+  .viz-tip {
+    position: fixed; display: none; z-index: 50; pointer-events: none;
+    background: #050810F2; border: 1px solid var(--line-2); border-radius: 6px;
+    padding: 8px 10px; font-size: 11.5px; color: var(--text);
+    box-shadow: 0 8px 24px -8px #000C; min-width: 132px;
+  }
+  .viz-tip .tip-h { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 5px; }
+  .viz-tip .tip-r { display: flex; align-items: center; gap: 7px; }
+  .viz-tip .tip-r i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .viz-tip .tip-r b { margin-left: auto; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .viz-tip .tip-s { margin-top: 4px; font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+
+  .empty { padding: 20px 13px; text-align: center; color: var(--muted); font-size: 12px; }
+  .note {
+    margin-top: 18px; padding: 11px 14px; border: 1px solid var(--line);
+    border-left: 2px solid var(--accent); border-radius: var(--r);
+    background: var(--surface); font-size: 12px; color: var(--muted);
+  }
+  code { font-family: var(--mono); font-size: 10.5px; background: var(--surface-3); padding: 1px 5px; border-radius: 4px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ow<span>·</span>watch<span>·</span>bot</h1>
+    <span class="v" id="ver">live</span>
+    <div class="conn" id="conn"><span class="dot"></span><span id="connText">connecting…</span></div>
+  </header>
+
+  <div class="claim-banner" id="claimBanner">
+    <span class="big" id="claimCount">0</span>
+    <span class="txt" id="claimText"></span>
+    <a href="https://www.twitch.tv/drops/inventory" target="_blank" rel="noopener">Claim on Twitch →</a>
+  </div>
+
+  <div class="grid">
+    <div class="col">
+      <section class="card">
+        <div class="hero">
+          <div class="hero-top">
+            <div class="pill s-unknown" id="pill"><span class="d"></span><span id="stateName">—</span></div>
+            <div class="tgt">
+              <span class="login" id="chan">—</span>
+              <span class="why" id="reason">waiting for the watcher</span>
+            </div>
+          </div>
+          <div class="metrics">
+            <div class="metric"><span class="k">Session</span><span class="v" id="mUp">0<small>m</small></span></div>
+            <div class="metric"><span class="k">Cycles</span><span class="v" id="mCycles">0</span></div>
+            <div class="metric"><span class="k">Credited</span><span class="v" id="mCred">—</span></div>
+            <div class="metric"><span class="k">Rotations</span><span class="v" id="mRot">0</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="head">
+          <span class="eyebrow">Rewards</span>
+          <span class="v" id="dropsMeta" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
+        </div>
+        <div id="camps"><div class="empty">Loading campaigns…</div></div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="card">
+        <div class="head">
+          <span class="eyebrow">Liveness signals</span>
+          <span id="pubsub" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
+        </div>
+        <table>
+          <thead><tr><th style="width:30px">ID</th><th>Signal</th><th style="width:84px">Vote</th></tr></thead>
+          <tbody id="sigRows"><tr><td colspan="3" class="empty">no reading yet</td></tr></tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <div class="head"><span class="eyebrow">Sessions</span></div>
+        <div class="feed" id="sessions" style="max-height:200px"><div class="empty">none recorded</div></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="card" style="margin-top:16px">
+    <div class="stat-row">
+      <div class="stat"><span class="k">Total watched</span><span class="v" id="statHours">0<u>h</u></span></div>
+      <div class="stat"><span class="k">Sessions</span><span class="v" id="statSessions">0</span></div>
+      <div class="stat"><span class="k">Avg session</span><span class="v" id="statAvg">—</span></div>
+      <div class="stat"><span class="k">Longest</span><span class="v" id="statLongest">—</span></div>
+    </div>
+    <div class="head" style="border-top:1px solid var(--line)">
+      <span class="eyebrow">Watch minutes over time</span>
+      <div class="toolbar">
+        <button data-range="1">1h</button>
+        <button data-range="6" class="on">6h</button>
+        <button data-range="24">24h</button>
+        <button data-range="168">7d</button>
+        <button id="btnTable">Table</button>
+      </div>
+    </div>
+    <div class="viz-legend">
+      <span><i style="background:#C98500"></i>credited by Twitch</span>
+      <span><i style="background:#8A66F2"></i>reported by bot</span>
+    </div>
+    <div class="viz" id="chartSeries"></div>
+  </section>
+
+  <div class="grid" style="margin-top:16px">
+    <section class="card">
+      <div class="head"><span class="eyebrow">Minutes per day</span></div>
+      <div class="viz" id="chartDaily"></div>
+    </section>
+    <div class="col">
+      <section class="card">
+        <div class="head"><span class="eyebrow">State transitions</span></div>
+        <div style="padding:8px 0 10px" id="chartStates"></div>
+      </section>
+      <section class="card">
+        <div class="head"><span class="eyebrow">By channel</span></div>
+        <div style="padding:8px 0 10px" id="chartChannels"></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="card" style="margin-top:16px">
+    <div class="head">
+      <span class="eyebrow">Log</span>
+      <div class="toolbar">
+        <button id="fAll" class="on">All</button>
+        <button id="fState">Transitions</button>
+        <button id="fEvent">Events</button>
+        <button id="fWarn">Warnings</button>
+        <button id="btnFollow" class="on">Follow</button>
+        <button id="btnClear">Clear</button>
+      </div>
+    </div>
+    <div class="feed" id="feed"><div class="empty">Waiting for the first log line…</div></div>
+  </section>
+
+  <div class="note">
+    Served by the running bot on localhost — these are its real logs, streamed over
+    <code>/api/events</code>, with rewards read from Twitch's own inventory via
+    <code>/api/drops</code>. Claiming is not automated: use the button above.
+    This is not the liveness <em>simulator</em>, which runs a fake Twitch for testing.
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const SIGNAL_NAMES = {
+    S1: "PubSub stream-down", S2: "user.stream is null", S3: "playback token",
+    S4: "spade rejected", S5: "progress delta",
+  };
+  const MAX_ROWS = 600;
+  let rows = [], filter = "all", follow = true;
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString();
+
+  const fmtLeft = (hours) => {
+    if (hours === null || hours === undefined) return "";
+    if (hours <= 0) return "ended";
+    if (hours < 1) return `${Math.round(hours * 60)}m left`;
+    if (hours < 48) return `${Math.round(hours)}h left`;
+    return `${Math.round(hours / 24)}d left`;
+  };
+  const fmtMins = (n) => (n >= 60 ? `${Math.floor(n / 60)}h${n % 60 ? ` ${n % 60}m` : ""}` : `${n}m`);
+
+  // ------------------------------------------------------------------ state
+  async function pollState() {
+    try {
+      const r = await fetch("/api/state");
+      if (r.ok) renderState(await r.json());
+    } catch { /* the connection pill already reports trouble */ }
+  }
+
+  function renderState(s) {
+    $("ver").textContent = `v${s.version} · live`;
+    const state = (s.paused ? "PAUSED" : s.state) || "UNKNOWN";
+    $("pill").className = "pill s-" + state.toLowerCase();
+    $("stateName").textContent = state;
+    $("chan").textContent = s.channel || "—";
+    $("reason").textContent = s.reason || "";
+
+    const st = s.stats || {};
+    $("mUp").innerHTML = `${Math.floor((st.uptime || 0) / 60)}<small>m</small>`;
+    $("mCycles").textContent = st.cycles ?? 0;
+    $("mRot").textContent = s.rotations ?? 0;
+    $("mCred").innerHTML =
+      st.credited_now === null || st.credited_now === undefined
+        ? "—"
+        : `${st.credited_now}` + (st.credited_gain ? ` <span class="up">+${st.credited_gain}</span>` : "");
+    $("pubsub").textContent = "pubsub " + (s.pubsub_connected ? "up" : "down");
+
+    const sig = s.signals || {};
+    const ids = Object.keys(sig);
+    $("sigRows").innerHTML = ids.length
+      ? ids.map((id) => `<tr>
+          <td><span class="sid">${esc(id)}</span></td>
+          <td><span class="sname">${esc(SIGNAL_NAMES[id] || id)}</span></td>
+          <td><span class="vote v-${esc(sig[id]).toLowerCase()}">${esc(sig[id])}</span></td>
+        </tr>`).join("")
+      : `<tr><td colspan="3" class="empty">no reading yet</td></tr>`;
+  }
+
+  // ----------------------------------------------------------------- rewards
+  async function pollDrops() {
+    try {
+      const r = await fetch("/api/drops");
+      if (r.ok) renderDrops(await r.json());
+    } catch { /* non-critical */ }
+  }
+
+  function renderDrops(d) {
+    const camps = d.campaigns || [];
+    const total = d.claimable_total || 0;
+
+    const banner = $("claimBanner");
+    banner.classList.toggle("on", total > 0);
+    if (total > 0) {
+      const names = camps.flatMap((c) => c.drops.filter((x) => x.claimable).map((x) => x.reward));
+      $("claimCount").textContent = total;
+      $("claimText").innerHTML =
+        `reward${total === 1 ? "" : "s"} earned and waiting — <b>${esc(names.slice(0, 3).join(", "))}` +
+        `${names.length > 3 ? ` +${names.length - 3} more` : ""}</b>`;
+    }
+
+    if (d.error) {
+      $("dropsMeta").textContent = "unavailable";
+      $("camps").innerHTML = `<div class="empty">Could not read inventory — ${esc(d.error)}</div>`;
+      return;
+    }
+    $("dropsMeta").textContent =
+      `${camps.length} campaign${camps.length === 1 ? "" : "s"}` +
+      (total ? ` · ${total} claimable` : "");
+
+    if (!camps.length) {
+      $("camps").innerHTML = `<div class="empty">No active campaigns for this account.</div>`;
+      return;
+    }
+
+    $("camps").innerHTML = camps.map((c) => {
+      const drops = (c.drops || []).map((x) => {
+        const cls = x.claimable ? "is-claimable" : x.claimed ? "is-claimed" : "";
+        const pct = Math.round((x.fraction || 0) * 100);
+        const status = x.claimable ? "claim it" : x.claimed ? "claimed" : `${fmtMins(x.remaining)} to go`;
+        const thumb = x.image
+          ? `<img class="thumb" src="${esc(x.image)}" alt="" loading="lazy"
+                  onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb ph',textContent:'◆'}))" />`
+          : `<div class="thumb ph">◆</div>`;
+        return `<div class="drop ${cls}">
+          ${thumb}
+          <div>
+            <div class="name">${esc(x.reward)}</div>
+            <div class="sub">${esc(x.current)} / ${esc(x.required)} min · ${pct}%</div>
+            <div class="track"><i style="width:${Math.min(100, pct)}%"></i></div>
+          </div>
+          <div class="right">
+            <div class="mins">${esc(fmtMins(x.required))}</div>
+            <div class="st">${esc(status)}</div>
+          </div>
+        </div>`;
+      }).join("");
+
+      return `<div class="camp">
+        <div class="camp-head">
+          <span class="nm">${esc(c.name)}</span>
+          <span class="game">${esc(c.game || "")}</span>
+          ${c.claimable_count ? `<span class="tag ready">${c.claimable_count} ready</span>` : ""}
+          <span class="left ${c.expiring_soon ? "soon" : ""}">${esc(fmtLeft(c.hours_left))}</span>
+        </div>
+        ${drops}
+      </div>`;
+    }).join("");
+  }
+
+  // ---------------------------------------------------------------- sessions
+  async function pollHistory() {
+    try {
+      const r = await fetch("/api/history");
+      if (!r.ok) return;
+      const { sessions } = await r.json();
+      $("sessions").innerHTML = sessions.length
+        ? sessions.map((x) => {
+            const when = new Date(x.started_at * 1000).toLocaleString([], {
+              month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+            return `<div class="row" style="grid-template-columns:92px 1fr 46px">
+              <span class="t">${esc(when)}</span>
+              <span class="lbl">${esc(x.channel)}</span>
+              <span class="msg" style="text-align:right">${esc(x.minutes ?? 0)}m</span>
+            </div>`;
+          }).join("")
+        : `<div class="empty">none recorded</div>`;
+    } catch { /* non-critical */ }
+  }
+
+  // -------------------------------------------------------------------- feed
+  const keep = (rec) =>
+    filter === "all" ? true
+    : filter === "transition" ? rec.kind === "transition"
+    : filter === "event" ? rec.kind === "event" || rec.kind === "transition"
+    : filter === "warn" ? ["warning", "error", "critical"].includes(rec.level)
+    : true;
+
+  function rowHTML(rec) {
+    const sig = rec.kind === "transition" && rec.detail && rec.detail.signals
+      ? " " + Object.entries(rec.detail.signals).map(([k, v]) => `${k}=${v}`).join(" ") : "";
+    return `<div class="row k-${esc(rec.kind)} lv-${esc(rec.level)}">
+      <span class="t">${esc(fmtTime(rec.ts))}</span>
+      <span class="lbl">${esc(rec.label)}</span>
+      <span class="msg">${esc(rec.message)}${esc(sig)}</span>
+    </div>`;
+  }
+
+  function paint() {
+    const feed = $("feed");
+    const visible = rows.filter(keep);
+    feed.innerHTML = visible.length
+      ? visible.map(rowHTML).join("")
+      : `<div class="empty">Nothing matches this filter.</div>`;
+    if (follow) feed.scrollTop = feed.scrollHeight;
+  }
+
+  function add(rec) {
+    rows.push(rec);
+    if (rows.length > MAX_ROWS) rows = rows.slice(-MAX_ROWS);
+    paint();
+    // A drop event means the inventory just moved; refresh without waiting.
+    if (rec.kind === "event" && String(rec.label).startsWith("drop.")) pollDrops();
+  }
+
+  // --------------------------------------------------------------------- sse
+  function connect() {
+    setConn("", "connecting…");
+    const source = new EventSource("/api/events");
+    source.onopen = () => setConn("live", "streaming");
+    source.onmessage = (e) => { try { add(JSON.parse(e.data)); } catch { /* bad frame */ } };
+    source.onerror = () => setConn("dead", "bot not reachable — retrying");
+  }
+  function setConn(cls, text) {
+    $("conn").className = "conn " + cls;
+    $("connText").textContent = text;
+  }
+
+  // ----------------------------------------------------------------- wiring
+  const buttons = { all: $("fAll"), transition: $("fState"), event: $("fEvent"), warn: $("fWarn") };
+  for (const [key, btn] of Object.entries(buttons)) {
+    btn.addEventListener("click", () => {
+      filter = key;
+      for (const b of Object.values(buttons)) b.classList.remove("on");
+      btn.classList.add("on");
+      paint();
+    });
+  }
+  $("btnFollow").addEventListener("click", () => {
+    follow = !follow;
+    $("btnFollow").classList.toggle("on", follow);
+    if (follow) paint();
+  });
+  $("btnClear").addEventListener("click", () => { rows = []; paint(); });
+  $("feed").addEventListener("scroll", () => {
+    const f = $("feed");
+    const atBottom = f.scrollHeight - f.scrollTop - f.clientHeight < 24;
+    if (!atBottom && follow) { follow = false; $("btnFollow").classList.remove("on"); }
+    else if (atBottom && !follow) { follow = true; $("btnFollow").classList.add("on"); }
+  });
+
+  connect();
+  pollState(); pollDrops(); pollHistory();
+  setInterval(pollState, 2000);
+  setInterval(pollDrops, 30000);
+  setInterval(pollHistory, 20000);
+})();
+</script>
+<script src="/ui/stats.js"></script>
+</body>
+</html>

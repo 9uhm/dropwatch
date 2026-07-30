@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dropwatch"
+version = "0.1.0"
+description = "Automated Twitch drop farmer for Overwatch campaigns, controlled from Discord"
+requires-python = ">=3.13"
+dependencies = [
+    "aiohttp>=3.10",
+    "discord.py>=2.4",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.6"]
+
+[project.scripts]
+dropwatch = "dropwatch.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dropwatch"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

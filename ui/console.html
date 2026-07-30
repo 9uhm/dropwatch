@@ -1,0 +1,1030 @@
+<title>dropwatch console</title>
+
+<style>
+  /* ---------------------------------------------------------------- tokens */
+  :root {
+    --bg: #0B0F16;
+    --surface: #111823;
+    --surface-2: #18202D;
+    --surface-3: #1E2836;
+    --line: #232E3D;
+    --text: #E6EAF2;
+    --text-dim: #A6B2C4;
+    --muted: #7F8CA1;
+    --accent: #A970FF;
+    --accent-dim: #6D45A8;
+    --accent-wash: #A970FF1F;
+    --gold: #F2A93B;
+    --gold-wash: #F2A93B1A;
+    --ok: #3DBE84;
+    --ok-wash: #3DBE841F;
+    --crit: #E5484D;
+    --crit-wash: #E5484D1F;
+    --unknown: #55637A;
+
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", "Consolas", "Menlo", monospace;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+
+    --r: 7px;
+    --shadow: 0 1px 2px #0006, 0 8px 24px -12px #0009;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #F6F7FA;
+      --surface: #FFFFFF;
+      --surface-2: #EFF2F7;
+      --surface-3: #E6EBF2;
+      --line: #DCE2EC;
+      --text: #131822;
+      --text-dim: #3E4859;
+      --muted: #5C6879;
+      --accent: #7C3AED;
+      --accent-dim: #A98AE0;
+      --accent-wash: #7C3AED14;
+      --gold: #9A6008;
+      --gold-wash: #B8751412;
+      --ok: #167C4E;
+      --ok-wash: #167C4E14;
+      --crit: #C4282D;
+      --crit-wash: #C4282D14;
+      --unknown: #8B97A8;
+      --shadow: 0 1px 2px #1318220D, 0 8px 24px -14px #13182226;
+    }
+  }
+
+  /* Viewer toggle must beat the media query in both directions. */
+  :root[data-theme="dark"] {
+    --bg: #0B0F16; --surface: #111823; --surface-2: #18202D; --surface-3: #1E2836;
+    --line: #232E3D; --text: #E6EAF2; --text-dim: #A6B2C4; --muted: #7F8CA1;
+    --accent: #A970FF; --accent-dim: #6D45A8; --accent-wash: #A970FF1F;
+    --gold: #F2A93B; --gold-wash: #F2A93B1A; --ok: #3DBE84; --ok-wash: #3DBE841F;
+    --crit: #E5484D; --crit-wash: #E5484D1F; --unknown: #55637A;
+    --shadow: 0 1px 2px #0006, 0 8px 24px -12px #0009;
+  }
+  :root[data-theme="light"] {
+    --bg: #F6F7FA; --surface: #FFFFFF; --surface-2: #EFF2F7; --surface-3: #E6EBF2;
+    --line: #DCE2EC; --text: #131822; --text-dim: #3E4859; --muted: #5C6879;
+    --accent: #7C3AED; --accent-dim: #A98AE0; --accent-wash: #7C3AED14;
+    --gold: #9A6008; --gold-wash: #B8751412; --ok: #167C4E; --ok-wash: #167C4E14;
+    --crit: #C4282D; --crit-wash: #C4282D14; --unknown: #8B97A8;
+    --shadow: 0 1px 2px #1318220D, 0 8px 24px -14px #13182226;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1320px; margin: 0 auto; padding: 20px 20px 56px; }
+
+  /* ----------------------------------------------------------------- type */
+  h1, h2, h3 { margin: 0; font-weight: 600; text-wrap: balance; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* --------------------------------------------------------------- header */
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding-bottom: 16px; margin-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; }
+  .brand h1 { font-size: 17px; letter-spacing: -0.01em; }
+  .brand .v { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+  .clock {
+    margin-left: auto; display: flex; align-items: center; gap: 14px;
+    font-family: var(--mono); font-size: 12px; color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .clock b { color: var(--text); font-weight: 600; }
+
+  /* ---------------------------------------------------------------- layout */
+  .grid {
+    display: grid;
+    grid-template-columns: 252px minmax(0, 1fr) 288px;
+    gap: 14px;
+    align-items: start;
+  }
+  @media (max-width: 1080px) { .grid { grid-template-columns: 1fr; } }
+
+  .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .card > header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 12px; margin: 0;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+  }
+  .card > header .eyebrow { margin-right: auto; }
+  .card .body { padding: 12px; }
+
+  /* ---------------------------------------------------------------- state */
+  .state-hero { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .state-top { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+
+  .state-pill {
+    font-family: var(--mono); font-size: 19px; font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 7px 14px; border-radius: 5px;
+    border: 1px solid; display: inline-flex; align-items: center; gap: 9px;
+  }
+  .state-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .state-pill.s-watching { color: var(--ok); background: var(--ok-wash); border-color: var(--ok); }
+  .state-pill.s-suspect  { color: var(--gold); background: var(--gold-wash); border-color: var(--gold); }
+  .state-pill.s-offline  { color: var(--crit); background: var(--crit-wash); border-color: var(--crit); }
+  /* STALLED shares gold with progress, so form carries it: dashed edge. */
+  .state-pill.s-stalled  { color: var(--gold); background: transparent; border: 2px dashed var(--gold); }
+  .state-pill.s-idle,
+  .state-pill.s-paused   { color: var(--muted); background: var(--surface-2); border-color: var(--line); }
+
+  .state-pill.s-watching .dot { animation: pulse 2.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.28; } }
+  @media (prefers-reduced-motion: reduce) {
+    .state-pill.s-watching .dot { animation: none; }
+  }
+
+  .target { display: flex; flex-direction: column; gap: 2px; }
+  .target .login { font-family: var(--mono); font-size: 17px; font-weight: 600; }
+  .target .why { font-size: 12px; color: var(--muted); }
+
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border-radius: 5px; overflow: hidden; }
+  .metric { background: var(--surface); padding: 9px 11px; display: flex; flex-direction: column; gap: 3px; }
+  .metric .k { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-family: var(--mono); }
+  .metric .v { font-family: var(--mono); font-size: 17px; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .metric .v small { font-size: 11px; font-weight: 400; color: var(--muted); }
+  @media (max-width: 560px) { .metrics { grid-template-columns: repeat(2, 1fr); } }
+
+  /* grace countdown */
+  .grace { display: none; flex-direction: column; gap: 5px; }
+  .grace.on { display: flex; }
+  .grace-head { display: flex; justify-content: space-between; font-size: 11px; font-family: var(--mono); color: var(--gold); }
+  .grace-track { height: 3px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+  .grace-fill { height: 100%; background: var(--gold); width: 0%; }
+
+  /* --------------------------------------------------------------- signals */
+  table.signals { width: 100%; border-collapse: collapse; }
+  table.signals th {
+    text-align: left; font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+    padding: 0 8px 7px; border-bottom: 1px solid var(--line);
+  }
+  table.signals td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  table.signals tr:last-child td { border-bottom: 0; }
+  .sig-code { font-family: var(--mono); font-size: 12px; color: var(--accent); font-weight: 600; }
+  .sig-name { font-size: 13px; }
+  .sig-src { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+
+  .vote {
+    display: inline-block; min-width: 66px; text-align: center;
+    font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.05em; padding: 3px 7px; border-radius: 3px;
+    border: 1px solid;
+  }
+  .vote.v-online   { color: var(--ok); background: var(--ok-wash); border-color: var(--ok); }
+  .vote.v-offline  { color: var(--crit); background: var(--crit-wash); border-color: var(--crit); }
+  .vote.v-unknown  { color: var(--unknown); background: transparent; border-color: var(--unknown); border-style: dashed; }
+  .vote.v-degraded { color: var(--gold); background: transparent; border-color: var(--gold); border-style: dotted; }
+
+  .weight { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+  .weight.w-high::before { content: "●●"; color: var(--accent); margin-right: 5px; }
+  .weight.w-med::before  { content: "●○"; color: var(--accent); margin-right: 5px; }
+  .weight.w-low::before  { content: "○○"; color: var(--muted); margin-right: 5px; }
+
+  /* per-signal read history */
+  .strip { display: flex; gap: 2px; align-items: flex-end; height: 16px; }
+  .strip i { width: 3px; border-radius: 1px; background: var(--unknown); height: 6px; }
+  .strip i.h-online  { background: var(--ok); height: 16px; }
+  .strip i.h-offline { background: var(--crit); height: 16px; }
+  .strip i.h-degraded{ background: var(--gold); height: 11px; }
+  .strip i:last-child { outline: 1px solid var(--text); outline-offset: 1px; }
+
+  /* quorum readout */
+  .quorum { display: flex; flex-direction: column; gap: 7px; padding: 11px 12px; background: var(--surface-2); border-top: 1px solid var(--line); }
+  .quorum-row { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 11.5px; }
+  .quorum-row .lbl { color: var(--muted); width: 118px; flex: none; }
+  .quorum-bar { flex: 1; height: 6px; background: var(--surface-3); border-radius: 3px; overflow: hidden; display: flex; }
+  .quorum-bar span { height: 100%; }
+  .verdict { font-family: var(--mono); font-size: 12px; padding: 7px 9px; border-radius: 4px; border-left: 3px solid var(--line); background: var(--surface-3); color: var(--text-dim); }
+  .verdict.hot { border-left-color: var(--crit); color: var(--text); }
+  .verdict.warm { border-left-color: var(--gold); color: var(--text); }
+
+  /* ----------------------------------------------------------- priority rail */
+  .chan {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 9px; border-radius: 5px; border: 1px solid transparent;
+    background: var(--surface-2);
+  }
+  .chan + .chan { margin-top: 6px; }
+  .chan.active { border-color: var(--accent); background: var(--accent-wash); }
+  .chan .pri { font-family: var(--mono); font-size: 10px; color: var(--muted); width: 20px; flex: none; }
+  .chan .login { font-family: var(--mono); font-size: 12.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chan .live { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--unknown); }
+  .chan .live.on { background: var(--ok); }
+  .chan .live.rerun { background: var(--gold); }
+  .chan .ctl { display: flex; gap: 2px; }
+
+  .discovered { margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--line); }
+
+  /* ----------------------------------------------------------------- drops */
+  .camp + .camp { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .camp-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 7px; }
+  .camp-head .nm { font-size: 12.5px; font-weight: 600; flex: 1; }
+  .camp-head .pct { font-family: var(--mono); font-size: 12px; color: var(--gold); font-variant-numeric: tabular-nums; }
+  .bar { height: 7px; background: var(--surface-3); border-radius: 4px; overflow: hidden; position: relative; }
+  .bar > i { display: block; height: 100%; background: var(--gold); border-radius: 4px; transition: width 0.4s ease; }
+  @media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+  .bar .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--surface); opacity: 0.7; }
+  .camp-meta { display: flex; justify-content: space-between; margin-top: 5px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .camp.done .bar > i { background: var(--ok); }
+  .camp.done .pct { color: var(--ok); }
+
+  /* ------------------------------------------------------------------ log */
+  .log { max-height: 236px; overflow-y: auto; }
+  .log-row {
+    display: grid; grid-template-columns: 62px 128px 1fr;
+    gap: 10px; padding: 6px 12px; align-items: baseline;
+    border-bottom: 1px solid var(--line); font-size: 12px;
+  }
+  .log-row:last-child { border-bottom: 0; }
+  .log-row .t { font-family: var(--mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .log-row .tr { font-family: var(--mono); font-size: 11px; }
+  .log-row .tr .to { font-weight: 600; }
+  .log-row .msg { color: var(--text-dim); }
+  .log-row .msg em { color: var(--text); font-style: normal; font-family: var(--mono); font-size: 11px; }
+  .log-row.lv-crit  .tr .to { color: var(--crit); }
+  .log-row.lv-warn  .tr .to { color: var(--gold); }
+  .log-row.lv-ok    .tr .to { color: var(--ok); }
+  .log-row.lv-good  { background: var(--gold-wash); }
+
+  /* ---------------------------------------------------------------- inputs */
+  button {
+    font-family: var(--sans); font-size: 12px; font-weight: 500;
+    color: var(--text); background: var(--surface-3);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 5px 10px; cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  button:hover:not(:disabled) { background: var(--surface-2); border-color: var(--accent-dim); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible, select:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  :root[data-theme="light"] button.primary, html:not([data-theme]) button.primary { color: #fff; }
+  button.primary:hover:not(:disabled) { filter: brightness(1.1); background: var(--accent); }
+  button.danger { color: var(--crit); border-color: var(--crit); background: var(--crit-wash); }
+  button.danger:hover:not(:disabled) { background: var(--crit); color: #fff; }
+  button.icon { padding: 2px 6px; font-family: var(--mono); font-size: 11px; line-height: 1.4; }
+
+  .faults { display: flex; flex-direction: column; gap: 6px; }
+  .fault { display: flex; align-items: center; gap: 9px; }
+  .fault button { flex: none; width: 118px; text-align: left; }
+  .fault .desc { font-size: 11.5px; color: var(--muted); }
+
+  .knob { display: grid; grid-template-columns: 1fr 52px; gap: 8px 10px; align-items: center; }
+  .knob label { font-size: 12px; color: var(--text-dim); }
+  .knob label small { display: block; font-size: 10.5px; color: var(--muted); font-family: var(--mono); }
+  .knob output { font-family: var(--mono); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+  input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 0; }
+  input[type="text"] {
+    font-family: var(--mono); font-size: 12px; width: 100%;
+    background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px;
+  }
+
+  .note {
+    display: flex; gap: 9px; align-items: flex-start;
+    margin-top: 20px; padding: 11px 13px;
+    border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: var(--r); background: var(--surface);
+    font-size: 12.5px; color: var(--text-dim);
+  }
+  .note b { color: var(--text); font-weight: 600; }
+  .note code { font-family: var(--mono); font-size: 11.5px; background: var(--surface-3); padding: 1px 4px; border-radius: 3px; }
+
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <h1>dropwatch</h1>
+      <span class="v">console&nbsp;·&nbsp;liveness simulator</span>
+    </div>
+    <div class="clock">
+      <span>sim&nbsp;<b class="num" id="clk">00:00:00</b></span>
+      <span>acct&nbsp;<b class="num">simulated</b></span>
+      <button id="btnPause" class="primary">Pause</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <!-- ------------------------------------------------- left: priority rail -->
+    <div class="col">
+      <section class="card">
+        <header><span class="eyebrow">Watch priority</span></header>
+        <div class="body">
+          <div id="chans"></div>
+          <div class="discovered">
+            <div class="eyebrow" style="margin-bottom:7px">Auto-discovered</div>
+            <div id="disc"></div>
+          </div>
+          <div class="row" style="margin-top:11px">
+            <input type="text" id="newChan" placeholder="add channel…" aria-label="Add channel" />
+            <button id="btnAdd">Add</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header><span class="eyebrow">Detector thresholds</span></header>
+        <div class="body">
+          <div class="knob">
+            <label for="kGrace">Grace period<small>absorbs ad breaks</small></label>
+            <output id="oGrace" class="num">90s</output>
+            <input type="range" id="kGrace" min="0" max="300" step="10" value="90" />
+
+            <label for="kConfirm">Confirm reads<small>independent OFFLINE votes</small></label>
+            <output id="oConfirm" class="num">2</output>
+            <input type="range" id="kConfirm" min="1" max="5" step="1" value="2" />
+
+            <label for="kStall">Stall cycles<small>zero-delta before STALLED</small></label>
+            <output id="oStall" class="num">3</output>
+            <input type="range" id="kStall" min="1" max="10" step="1" value="3" />
+
+            <label for="kSpeed">Sim speed<small>simulated seconds per tick</small></label>
+            <output id="oSpeed" class="num">10s</output>
+            <input type="range" id="kSpeed" min="1" max="60" step="1" value="10" />
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ------------------------------------------------------- centre column -->
+    <div class="col">
+      <section class="card">
+        <div class="state-hero">
+          <div class="state-top">
+            <div class="state-pill s-idle" id="statePill"><span class="dot"></span><span id="stateName">IDLE</span></div>
+            <div class="target">
+              <span class="login" id="tgtLogin">—</span>
+              <span class="why" id="tgtWhy">no target selected</span>
+            </div>
+          </div>
+
+          <div class="grace" id="graceBox">
+            <div class="grace-head">
+              <span>grace period — holding before rotation</span>
+              <span class="num" id="graceLeft">90s</span>
+            </div>
+            <div class="grace-track"><div class="grace-fill" id="graceFill"></div></div>
+          </div>
+
+          <div class="metrics">
+            <div class="metric">
+              <span class="k">Session</span>
+              <span class="v" id="mUptime">0<small>m</small></span>
+            </div>
+            <div class="metric">
+              <span class="k">Minutes sent</span>
+              <span class="v" id="mMinutes">0</span>
+            </div>
+            <div class="metric">
+              <span class="k">Credited</span>
+              <span class="v" id="mCredited">0</span>
+            </div>
+            <div class="metric">
+              <span class="k">Rotations</span>
+              <span class="v" id="mRot">0</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header>
+          <span class="eyebrow">Liveness signals</span>
+          <span class="sig-src" id="probeState">no probe running</span>
+        </header>
+        <table class="signals">
+          <thead>
+            <tr>
+              <th style="width:34px">ID</th>
+              <th>Signal</th>
+              <th style="width:74px">Weight</th>
+              <th style="width:86px">Vote</th>
+              <th style="width:76px">History</th>
+            </tr>
+          </thead>
+          <tbody id="sigRows"></tbody>
+        </table>
+        <div class="quorum">
+          <div class="quorum-row">
+            <span class="lbl">weighted quorum</span>
+            <div class="quorum-bar" id="qBar"></div>
+            <span id="qNum" class="num">0 / 0</span>
+          </div>
+          <div class="verdict" id="verdict">Waiting for first cycle.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header>
+          <span class="eyebrow">Transition log</span>
+          <span class="sig-src">newest first</span>
+        </header>
+        <div class="log" id="log"></div>
+      </section>
+    </div>
+
+    <!-- --------------------------------------------------------- right column -->
+    <div class="col">
+      <section class="card">
+        <header><span class="eyebrow">Fault injection</span></header>
+        <div class="body faults">
+          <div class="fault">
+            <button id="fEnd">End stream</button>
+            <span class="desc">S1 pushes <code>stream-down</code></span>
+          </div>
+          <div class="fault">
+            <button id="fAd">Ad break</button>
+            <span class="desc">40s blip — must be absorbed</span>
+          </div>
+          <div class="fault">
+            <button id="fStall">Stop crediting</button>
+            <span class="desc">live, but progress flatlines</span>
+          </div>
+          <div class="fault">
+            <button id="fSocket">Kill PubSub</button>
+            <span class="desc">S1 → UNKNOWN, not OFFLINE</span>
+          </div>
+          <div class="fault">
+            <button id="f5xx">Twitch 5xx</button>
+            <span class="desc">spade rejects telemetry</span>
+          </div>
+          <div class="fault">
+            <button id="fRerun">Switch to rerun</button>
+            <span class="desc">live but drops ineligible</span>
+          </div>
+          <div class="row" style="margin-top:5px">
+            <button id="fClear">Clear faults</button>
+            <button id="fRotate">Force rotate</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header>
+          <span class="eyebrow">Drop progress</span>
+          <span class="sig-src" id="claimCount">0 claimed</span>
+        </header>
+        <div class="body" id="camps"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="note">
+    <div>
+      <b>This runs the phase&nbsp;3 state machine, not the real bot.</b>
+      Every transition below is produced by the same quorum-and-hysteresis logic described in
+      <code>PLAN.md §4</code>, executing client-side against a simulated Twitch. Nothing here
+      touches the network, and no drop progress is real. Use the fault buttons to check the
+      design holds: an <em>ad break</em> must never rotate, a <em>dead PubSub socket</em> must
+      never read as offline, and <em>stopped crediting</em> must land in <code>STALLED</code>
+      rather than <code>OFFLINE</code>. Adjust the thresholds on the left and watch the
+      behaviour change before we commit it to Python.
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ------------------------------------------------------------------ model
+  const SIGNALS = [
+    { id: "S1", name: "PubSub stream-down",  src: "websocket push", weight: "high", w: 3 },
+    { id: "S2", name: "user.stream is null", src: "gql poll 60s",   weight: "high", w: 3 },
+    { id: "S3", name: "playback token 404",  src: "active probe",   weight: "med",  w: 2 },
+    { id: "S4", name: "spade rejected",      src: "watch loop",     weight: "low",  w: 1 },
+    { id: "S5", name: "progress delta = 0",  src: "session ctx",    weight: "low",  w: 1 },
+  ];
+
+  const CAMPAIGNS = [
+    { id: "c1", name: "OWCS Loot Box",        need: 240, have: 186, ticks: [60, 120, 180] },
+    { id: "c2", name: "Legendary Skin Voucher", need: 360, have: 92,  ticks: [180] },
+    { id: "c3", name: "OWCS Player Icon",     need: 60,  have: 60,  ticks: [] },
+  ];
+
+  const st = {
+    state: "IDLE",
+    paused: false,
+    clock: 0,
+    target: null,
+    why: "—",
+    sessionStart: 0,
+    minutes: 0,
+    credited: 0,
+    rotations: 0,
+    claims: 0,
+    suspectSince: null,
+    offlineReads: 0,
+    zeroDeltaRuns: 0,
+    probing: false,
+    votes: {},          // id -> ONLINE | OFFLINE | UNKNOWN | DEGRADED
+    hist: {},           // id -> array of votes
+    faults: { ended: false, ad: 0, noCredit: false, socket: false, spade: false, rerun: false },
+    cfg: { grace: 90, confirm: 2, stall: 3, speed: 10 },
+    log: [],
+    channels: [
+      { login: "overwatchleague",     pri: 10, live: true,  rerun: false, discovered: false },
+      { login: "overwatchcontenders", pri: 20, live: false, rerun: false, discovered: false },
+    ],
+    disc: [
+      { login: "owcs_emea",     pri: 90, live: true,  rerun: false, discovered: true },
+      { login: "owcs_na",       pri: 91, live: false, rerun: false, discovered: true },
+      { login: "overwatch2_vod", pri: 92, live: true,  rerun: true,  discovered: true },
+    ],
+  };
+
+  SIGNALS.forEach(s => { st.votes[s.id] = "UNKNOWN"; st.hist[s.id] = []; });
+  CAMPAIGNS.forEach(c => { c.have0 = c.have; });
+
+  // -------------------------------------------------------------- utilities
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  const fmtClock = s => {
+    s = Math.floor(s);
+    const h = String(Math.floor(s / 3600)).padStart(2, "0");
+    const m = String(Math.floor(s / 60) % 60).padStart(2, "0");
+    return `${h}:${m}:${String(s % 60).padStart(2, "0")}`;
+  };
+
+  function allTargets() {
+    return [...st.channels, ...st.disc].sort((a, b) => a.pri - b.pri || a.login.localeCompare(b.login));
+  }
+  function findChan(login) {
+    return allTargets().find(c => c.login === login) || null;
+  }
+
+  function logLine(from, to, msg, level) {
+    st.log.unshift({ t: st.clock, from, to, msg, level: level || "" });
+    if (st.log.length > 60) st.log.pop();
+  }
+
+  // ---------------------------------------------------------- state machine
+  function transition(to, msg, level) {
+    if (st.state === to) return;
+    const from = st.state;
+    st.state = to;
+    logLine(from, to, msg, level);
+  }
+
+  /** Recompute each signal's vote from the simulated world. */
+  function readSignals() {
+    const t = st.target;
+    const online = t && t.live && !st.faults.ended;
+    const adBlip = st.faults.ad > 0;
+
+    // S1 — PubSub. A dead socket yields UNKNOWN, never OFFLINE: that distinction
+    // is the whole point of weighting it against an active probe.
+    if (st.faults.socket) st.votes.S1 = "UNKNOWN";
+    else if (!online || adBlip) st.votes.S1 = "OFFLINE";
+    else st.votes.S1 = "ONLINE";
+
+    // S2 — authoritative poll, only refreshed on its own cadence or a probe.
+    const due = st.clock % 60 < st.cfg.speed || st.probing;
+    if (due) st.votes.S2 = online ? "ONLINE" : "OFFLINE";
+
+    // S3 — active probe only; idle otherwise.
+    st.votes.S3 = st.probing ? (online ? "ONLINE" : "OFFLINE") : "UNKNOWN";
+
+    // S4 — telemetry health, never a liveness verdict on its own.
+    st.votes.S4 = st.faults.spade ? "DEGRADED" : (online ? "ONLINE" : "OFFLINE");
+
+    // S5 — crediting. A rerun is live but ineligible, so it reads as no delta.
+    const crediting = online && !st.faults.noCredit && !(t && t.rerun);
+    st.votes.S5 = crediting ? "ONLINE" : "DEGRADED";
+
+    SIGNALS.forEach(s => {
+      const h = st.hist[s.id];
+      h.push(st.votes[s.id]);
+      if (h.length > 20) h.shift();
+    });
+    return { online, crediting };
+  }
+
+  /** Weighted quorum over signals that actually carry a liveness verdict. */
+  function quorum() {
+    let off = 0, on = 0, total = 0;
+    for (const s of SIGNALS) {
+      if (s.id === "S4" || s.id === "S5") continue;   // health, not liveness
+      const v = st.votes[s.id];
+      if (v === "UNKNOWN") continue;
+      total += s.w;
+      if (v === "OFFLINE") off += s.w; else on += s.w;
+    }
+    return { off, on, total };
+  }
+
+  /**
+   * Highest-priority live, drops-eligible channel.
+   * `avoid` excludes the channel we're rotating away from — without it, a target
+   * that stopped crediting would be picked straight back up and we'd rotate in
+   * place forever.
+   */
+  function pickTarget(avoid) {
+    const eligible = allTargets().filter(c => c.live && !c.rerun);
+    return eligible.find(c => c.login !== avoid) || eligible[0] || null;
+  }
+
+  function rotate(reason, level) {
+    const prev = st.target ? st.target.login : "—";
+    const next = pickTarget(st.target ? st.target.login : null);
+    if (!next) {
+      st.target = null;
+      st.why = "nothing eligible is live";
+      transition("IDLE", `no eligible target after ${prev}`, "lv-warn");
+      resetSession();
+      return;
+    }
+    st.target = next;
+    st.why = next.discovered ? "auto-discovered, drops enabled" : `priority ${next.pri}`;
+    st.rotations++;
+    logLine("→", next.login, `rotated from <em>${esc(prev)}</em> — ${reason}`, "lv-ok");
+    transition("WATCHING", `now watching <em>${esc(next.login)}</em>`, "lv-ok");
+    resetSession();
+    clearTransient();
+  }
+
+  function resetSession() {
+    st.sessionStart = st.clock;
+    st.minutes = 0;
+    st.suspectSince = null;
+    st.offlineReads = 0;
+    st.zeroDeltaRuns = 0;
+  }
+  function clearTransient() {
+    st.faults.ended = false;
+    st.faults.noCredit = false;
+    st.faults.ad = 0;
+  }
+
+  function tick() {
+    if (st.paused) return;
+    const dt = st.cfg.speed;
+    st.clock += dt;
+    if (st.faults.ad > 0) st.faults.ad = Math.max(0, st.faults.ad - dt);
+
+    // Cold start.
+    if (st.state === "IDLE") {
+      const next = pickTarget();
+      if (next) {
+        st.target = next;
+        st.why = next.discovered ? "auto-discovered, drops enabled" : `priority ${next.pri}`;
+        resetSession();
+        transition("WATCHING", `now watching <em>${esc(next.login)}</em>`, "lv-ok");
+      } else {
+        readSignals(); render(); return;
+      }
+    }
+
+    const { online, crediting } = readSignals();
+    const q = quorum();
+
+    // --- telemetry + progress -------------------------------------------
+    if (st.state === "WATCHING" || st.state === "SUSPECT") {
+      if (!st.faults.spade) st.minutes += Math.max(1, Math.round(dt / 60));
+      if (crediting) {
+        st.credited += Math.max(1, Math.round(dt / 60));
+        st.zeroDeltaRuns = 0;
+        advanceCampaigns();
+      } else if (online) {
+        st.zeroDeltaRuns++;
+      }
+    }
+
+    // --- terminal states rotate on the FOLLOWING tick --------------------
+    // Rotating in the same tick that we enter OFFLINE/STALLED would make both
+    // states invisible to the operator — the pill would never show them and only
+    // the log would record it. Hold one tick, then rotate.
+    if (st.state === "STALLED") {
+      rotate("live but not crediting", "lv-warn");
+      render(); return;
+    }
+    if (st.state === "OFFLINE") {
+      rotate("stream ended", "lv-crit");
+      render(); return;
+    }
+    if (st.state === "WATCHING" && online && st.zeroDeltaRuns >= st.cfg.stall) {
+      const why = st.target && st.target.rerun
+        ? "target is a rerun — drops never credit on vodcasts"
+        : `no progress delta across ${st.zeroDeltaRuns} checks while nominally online`;
+      transition("STALLED", why, "lv-warn");
+      render(); return;
+    }
+
+    // --- WATCHING -> SUSPECT --------------------------------------------
+    if (st.state === "WATCHING" && q.off > 0) {
+      st.suspectSince = st.clock;
+      st.offlineReads = 1;
+      st.probing = true;
+      transition("SUSPECT", `offline vote from ${offVoters()} — probing to confirm`, "lv-warn");
+      render(); return;
+    }
+
+    // --- SUSPECT: confirm, or absorb the flap ---------------------------
+    if (st.state === "SUSPECT") {
+      const elapsed = st.clock - st.suspectSince;
+
+      if (q.off === 0) {
+        st.probing = false;
+        const held = Math.round(elapsed);
+        transition("WATCHING", `signals recovered after <em>${held}s</em> — flap absorbed, no rotation`, "lv-ok");
+        st.offlineReads = 0;
+        render(); return;
+      }
+
+      st.offlineReads++;
+      const confirmed = st.offlineReads >= st.cfg.confirm && q.off > q.on;
+
+      if (confirmed && elapsed >= st.cfg.grace) {
+        st.probing = false;
+        transition("OFFLINE", `confirmed by ${offVoters()} after <em>${Math.round(elapsed)}s</em> grace`, "lv-crit");
+        render(); return;   // rotation happens next tick, so OFFLINE is visible
+      }
+    }
+
+    render();
+  }
+
+  function offVoters() {
+    return SIGNALS.filter(s => st.votes[s.id] === "OFFLINE" && s.id !== "S4" && s.id !== "S5")
+      .map(s => s.id).join("+") || "none";
+  }
+
+  function advanceCampaigns() {
+    for (const c of CAMPAIGNS) {
+      if (c.have >= c.need) continue;
+      c.have = Math.min(c.need, c.have + 1);
+      if (c.have >= c.need && !c.claimed) {
+        c.claimed = true;
+        st.claims++;
+        logLine("drop", "CLAIMED", `<em>${esc(c.name)}</em> completed and auto-claimed`, "lv-good");
+      }
+      break;      // only the closest-to-completion campaign advances
+    }
+  }
+
+  // ------------------------------------------------------------------ render
+  function render() {
+    $("clk").textContent = fmtClock(st.clock);
+
+    const pill = $("statePill");
+    pill.className = "state-pill s-" + (st.paused ? "paused" : st.state.toLowerCase());
+    $("stateName").textContent = st.paused ? "PAUSED" : st.state;
+
+    $("tgtLogin").textContent = st.target ? st.target.login : "—";
+    $("tgtWhy").textContent = st.target ? st.why : "no eligible channel is live";
+
+    const upt = st.target ? Math.max(0, st.clock - st.sessionStart) : 0;
+    $("mUptime").innerHTML = `${Math.floor(upt / 60)}<small>m</small>`;
+    $("mMinutes").textContent = st.minutes;
+    $("mCredited").textContent = st.credited;
+    $("mRot").textContent = st.rotations;
+
+    // grace countdown
+    const gb = $("graceBox");
+    if (st.state === "SUSPECT" && st.suspectSince !== null && st.cfg.grace > 0) {
+      const el = st.clock - st.suspectSince;
+      const pctv = Math.min(100, (el / st.cfg.grace) * 100);
+      gb.classList.add("on");
+      $("graceFill").style.width = pctv + "%";
+      $("graceLeft").textContent = Math.max(0, Math.round(st.cfg.grace - el)) + "s left";
+    } else {
+      gb.classList.remove("on");
+    }
+
+    $("probeState").textContent = st.probing ? "active probe running (S2+S3 forced)" : "no probe running";
+
+    // signals table
+    $("sigRows").innerHTML = SIGNALS.map(s => {
+      const v = st.votes[s.id];
+      const strip = st.hist[s.id].map(h => `<i class="h-${h.toLowerCase()}"></i>`).join("");
+      return `<tr>
+        <td><span class="sig-code">${s.id}</span></td>
+        <td><div class="sig-name">${esc(s.name)}</div><div class="sig-src">${esc(s.src)}</div></td>
+        <td><span class="weight w-${s.weight === "high" ? "high" : s.weight === "med" ? "med" : "low"}">${s.weight}</span></td>
+        <td><span class="vote v-${v.toLowerCase()}">${v}</span></td>
+        <td><div class="strip">${strip}</div></td>
+      </tr>`;
+    }).join("");
+
+    // quorum bar
+    const q = quorum();
+    const offPct = q.total ? (q.off / q.total) * 100 : 0;
+    $("qBar").innerHTML =
+      `<span style="width:${offPct}%;background:var(--crit)"></span>` +
+      `<span style="width:${100 - offPct}%;background:var(--ok)"></span>`;
+    $("qNum").textContent = `${q.off} / ${q.total}`;
+
+    const vd = $("verdict");
+    if (st.state === "SUSPECT") {
+      vd.className = "verdict hot";
+      vd.innerHTML = `${offVoters()} voting OFFLINE · read ${st.offlineReads} of ${st.cfg.confirm} required · ` +
+        `holding ${Math.round(st.clock - st.suspectSince)}s of ${st.cfg.grace}s grace`;
+    } else if (st.state === "STALLED") {
+      vd.className = "verdict warm";
+      vd.innerHTML = `Live and telemetry accepted, but nothing credited across ${st.zeroDeltaRuns} checks.`;
+    } else if (st.votes.S1 === "UNKNOWN") {
+      vd.className = "verdict warm";
+      vd.innerHTML = `PubSub socket is down — S1 abstains rather than voting OFFLINE. Polling carries the verdict.`;
+    } else if (st.state === "WATCHING") {
+      vd.className = "verdict";
+      vd.innerHTML = `All liveness signals agree the stream is up. ${st.faults.spade ? "Telemetry degraded — minutes are not being sent." : "Telemetry accepted."}`;
+    } else {
+      vd.className = "verdict";
+      vd.innerHTML = st.state === "IDLE" ? "Idle — polling for an eligible channel." : "—";
+    }
+
+    renderChannels();
+    renderCampaigns();
+    renderLog();
+  }
+
+  function chanHTML(c) {
+    const active = st.target && st.target.login === c.login;
+    const cls = c.rerun ? "live rerun" : c.live ? "live on" : "live";
+    const title = c.rerun ? "live, but a rerun — drops ineligible" : c.live ? "live" : "offline";
+    return `<div class="chan${active ? " active" : ""}">
+      <span class="pri">${c.discovered ? "auto" : c.pri}</span>
+      <span class="${cls}" title="${title}"></span>
+      <span class="login">${esc(c.login)}</span>
+      <span class="ctl">
+        <button class="icon" data-act="toggle" data-ch="${esc(c.login)}" title="toggle live">${c.live ? "◼" : "▶"}</button>
+        ${c.discovered ? "" : `<button class="icon" data-act="up" data-ch="${esc(c.login)}" title="raise priority">↑</button>
+        <button class="icon" data-act="del" data-ch="${esc(c.login)}" title="remove">✕</button>`}
+      </span>
+    </div>`;
+  }
+  function renderChannels() {
+    $("chans").innerHTML = st.channels.sort((a, b) => a.pri - b.pri).map(chanHTML).join("") ||
+      `<div class="sig-src">none listed — relying on discovery</div>`;
+    $("disc").innerHTML = st.disc.map(chanHTML).join("");
+  }
+
+  function renderCampaigns() {
+    $("claimCount").textContent = `${st.claims} claimed`;
+    $("camps").innerHTML = CAMPAIGNS.map(c => {
+      const pctv = Math.round((c.have / c.need) * 100);
+      const ticks = c.ticks.map(t => `<span class="tick" style="left:${(t / c.need) * 100}%"></span>`).join("");
+      return `<div class="camp${c.have >= c.need ? " done" : ""}">
+        <div class="camp-head">
+          <span class="nm">${esc(c.name)}</span>
+          <span class="pct">${pctv}%</span>
+        </div>
+        <div class="bar"><i style="width:${pctv}%"></i>${ticks}</div>
+        <div class="camp-meta">
+          <span>${c.have} / ${c.need} min</span>
+          <span>${c.have >= c.need ? "claimed" : `${c.need - c.have} min left`}</span>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  function renderLog() {
+    $("log").innerHTML = st.log.map(r => `<div class="log-row ${r.level}">
+      <span class="t">${fmtClock(r.t)}</span>
+      <span class="tr">${esc(r.from)} <span class="to">→ ${esc(r.to)}</span></span>
+      <span class="msg">${r.msg}</span>
+    </div>`).join("") || `<div class="log-row"><span class="msg">No transitions yet.</span></div>`;
+  }
+
+  // ------------------------------------------------------------------ wiring
+  $("chans").addEventListener("click", onChanClick);
+  $("disc").addEventListener("click", onChanClick);
+  function onChanClick(e) {
+    const b = e.target.closest("button[data-act]");
+    if (!b) return;
+    const c = findChan(b.dataset.ch);
+    if (!c) return;
+    if (b.dataset.act === "toggle") {
+      c.live = !c.live;
+      logLine("op", c.live ? "LIVE" : "OFFLINE", `<em>${esc(c.login)}</em> marked ${c.live ? "live" : "offline"}`, "");
+      if (!c.live && st.target && st.target.login === c.login) st.faults.ended = true;
+    } else if (b.dataset.act === "up") {
+      c.pri = Math.max(1, c.pri - 15);
+    } else if (b.dataset.act === "del") {
+      st.channels = st.channels.filter(x => x.login !== c.login);
+      if (st.target && st.target.login === c.login) rotate("target removed from list", "lv-warn");
+    }
+    render();
+  }
+
+  $("btnAdd").addEventListener("click", addChan);
+  $("newChan").addEventListener("keydown", e => { if (e.key === "Enter") addChan(); });
+  function addChan() {
+    const raw = $("newChan").value.trim().toLowerCase()
+      .replace(/^https?:\/\//, "").replace(/^(www\.)?twitch\.tv\//, "");
+    if (!raw || findChan(raw)) { $("newChan").value = ""; return; }
+    const maxPri = st.channels.reduce((m, c) => Math.max(m, c.pri), 0);
+    st.channels.push({ login: raw, pri: maxPri + 10, live: false, rerun: false, discovered: false });
+    logLine("op", "ADDED", `<em>${esc(raw)}</em> added to the priority list`, "");
+    $("newChan").value = "";
+    render();
+  }
+
+  $("btnPause").addEventListener("click", () => {
+    st.paused = !st.paused;
+    $("btnPause").textContent = st.paused ? "Resume" : "Pause";
+    logLine("op", st.paused ? "PAUSED" : "RESUMED", st.paused ? "watching suspended by operator" : "watching resumed", "");
+    render();
+  });
+
+  const knobs = [
+    ["kGrace", "oGrace", "grace", v => v + "s"],
+    ["kConfirm", "oConfirm", "confirm", v => v],
+    ["kStall", "oStall", "stall", v => v],
+    ["kSpeed", "oSpeed", "speed", v => v + "s"],
+  ];
+  for (const [inp, out, key, fmt] of knobs) {
+    $(inp).addEventListener("input", e => {
+      st.cfg[key] = Number(e.target.value);
+      $(out).textContent = fmt(e.target.value);
+      render();
+    });
+  }
+
+  $("fEnd").addEventListener("click", () => {
+    if (st.target) st.target.live = false;
+    st.faults.ended = true;
+    logLine("fault", "STREAM DOWN", "injected: broadcaster ended the stream", "lv-crit");
+    render();
+  });
+  $("fAd").addEventListener("click", () => {
+    st.faults.ad = 40;
+    logLine("fault", "AD BREAK", "injected: 40s playback interruption", "lv-warn");
+    render();
+  });
+  $("fStall").addEventListener("click", () => {
+    st.faults.noCredit = true;
+    logLine("fault", "NO CREDIT", "injected: watch minutes accepted but not credited", "lv-warn");
+    render();
+  });
+  $("fSocket").addEventListener("click", () => {
+    st.faults.socket = !st.faults.socket;
+    logLine("fault", st.faults.socket ? "SOCKET DOWN" : "SOCKET UP",
+      st.faults.socket ? "injected: PubSub websocket dropped — S1 abstains" : "PubSub reconnected", "lv-warn");
+    render();
+  });
+  $("f5xx").addEventListener("click", () => {
+    st.faults.spade = !st.faults.spade;
+    logLine("fault", st.faults.spade ? "SPADE 5XX" : "SPADE OK",
+      st.faults.spade ? "injected: telemetry endpoint rejecting posts" : "telemetry endpoint recovered", "lv-warn");
+    render();
+  });
+  $("fRerun").addEventListener("click", () => {
+    if (!st.target) return;
+    st.target.rerun = !st.target.rerun;
+    logLine("fault", st.target.rerun ? "RERUN" : "LIVE",
+      `<em>${esc(st.target.login)}</em> is ${st.target.rerun ? "now a rerun — drops ineligible" : "a live broadcast again"}`, "lv-warn");
+    render();
+  });
+  $("fClear").addEventListener("click", () => {
+    st.faults = { ended: false, ad: 0, noCredit: false, socket: false, spade: false, rerun: false };
+    st.channels.concat(st.disc).forEach(c => { if (c.rerun && c.login !== "overwatch2_vod") c.rerun = false; });
+    logLine("op", "CLEARED", "all injected faults cleared", "");
+    render();
+  });
+  $("fRotate").addEventListener("click", () => rotate("manual rotation by operator", "lv-ok"));
+
+  // ------------------------------------------------------------------- start
+  render();
+  setInterval(tick, 500);
+})();
+</script>

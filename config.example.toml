@@ -1,0 +1,96 @@
+# Copy to config.toml. This file holds bootstrap defaults.
+#
+# Values changed at runtime via Discord `/config set` are stored in SQLite and
+# layered ON TOP of this file, so the bot never writes back here and your
+# hand-edits are never clobbered. `/config show` displays the effective merge.
+
+[watch]
+# Ordered priority list. The bot watches the highest-priority channel that is
+# live AND drops-eligible. Lower `priority` number wins.
+# Accepts either a bare string or a table with an explicit priority.
+# `overwatchleague` is deliberately absent: OWL shut down in 2023 and the channel
+# is permanently offline. `ow_esports` is the live OWCS broadcast channel.
+channels = [
+    { login = "ow_esports", priority = 10 },
+    { login = "overwatchcontenders", priority = 20 },
+]
+
+# If no configured channel is live, search the game directory for any live
+# channel with drops enabled.
+auto_discovery = true
+
+# Category to search when auto-discovering.
+game = "Overwatch 2"
+
+# Seconds between minute-watched telemetry posts. Twitch counts a minute per
+# event; 58s with jitter stays under the wire without looking metronomic.
+minute_watched_interval = 58.0
+minute_watched_jitter = 3.0
+
+# Re-read authoritative drop progress every Nth watch cycle (keeps GQL load low).
+progress_check_every = 3
+
+# Seconds between target scans while idle (nothing eligible is live).
+idle_poll_interval = 300.0
+
+# Claim drops automatically the moment they complete.
+auto_claim = true
+
+[liveness]
+# Absorbs ad breaks and brief encoder drops before we consider rotating.
+grace_period = 90.0
+
+# Backstop poll of authoritative stream state (PubSub is the fast path).
+stream_poll_interval = 60.0
+
+# Consecutive progress checks with zero delta before declaring STALLED
+# (live, telemetry accepted, but Twitch is not crediting).
+stall_cycles = 3
+
+# Independent OFFLINE reads required to confirm, absent an active probe.
+confirm_reads = 2
+
+[twitch]
+# Public client ID of the Twitch TV/console app — the only public client that
+# supports the OAuth device flow. Overridable in case Twitch rotates it.
+client_id = "ue6666qo983tsx6so1t0vnawi233wa"
+scopes = ["user:read:follows"]
+
+# Refresh the access token once this fraction of its lifetime has elapsed.
+# Note: Twitch issues non-expiring tokens to TV clients, so this often never
+# applies — `dropwatch whoami` will say "does not expire".
+refresh_at_lifetime_fraction = 0.8
+
+# The *web* client ID, sent on GraphQL calls. Deliberately different from
+# `client_id` above: the token is issued to the TV client, but GraphQL has to
+# identify as the web player.
+gql_client_id = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+
+# Send our own verified query documents instead of Twitch's persisted-query
+# hashes. Documents don't rotate, so this is the robust default — as of the last
+# check, several of the fallback hashes are already stale while every operation
+# still works. Set false to mimic the real web client more closely, accepting
+# that a Twitch redeploy can then break operations until the hashes are updated
+# in data/gql_operations.json. Verify either way with `dropwatch gql-check`.
+prefer_documents = true
+
+# Retry/backoff for GraphQL. Backoff is exponential with full jitter.
+gql_max_concurrency = 4
+gql_max_retries = 3
+gql_backoff_base = 0.5
+gql_backoff_max = 20.0
+
+[discord]
+# Fill these in for phase 5. `owner_id` gates every mutating command.
+owner_id = 0
+guild_id = 0
+notify_channel_id = 0
+ping_role_id = 0
+
+# Minimum seconds between status-embed edits (Discord rate-limit guard).
+status_edit_throttle = 60.0
+
+[logging]
+level = "INFO"
+# Keep the last N state transitions queryable via `/logs`.
+history_size = 200

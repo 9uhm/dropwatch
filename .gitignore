@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Build output
+build/
+dist/
+
+# Secrets and local state — never commit
+.env
+config.toml
+data/
