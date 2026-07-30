@@ -20,7 +20,6 @@ drops-enabled Overwatch campaign), with full Discord control.
 3. **Progress is server-side.** The bot doesn't accumulate a local timer; it reports
    watch minutes and reads Twitch's authoritative progress. The local counter is only
    ever a display/heuristic value.
-4. **Automation here violates Twitch ToS.** Acknowledged; not re-litigated below.
 
 ---
 

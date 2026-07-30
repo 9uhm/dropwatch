@@ -3,10 +3,6 @@
 Two routes. **Route A needs nothing installed** and takes about five minutes; take
 it unless you intend to change the code.
 
-Before either: automating Twitch viewing to farm drops **violates Twitch's Terms of
-Service** and can get the account actioned. Everything below assumes you've decided
-that's your risk to take. Use an account you can afford to lose.
-
 ---
 
 ## Route A — the .exe (no Python, no build)

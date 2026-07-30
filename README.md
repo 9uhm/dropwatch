@@ -3,9 +3,6 @@
 A Twitch drop campaign miner for Overwatch, with multi-signal stream-end detection
 and a live local dashboard. API-only — no browser, no video decoded, ~30 MB resident.
 
-> **Heads up:** automated drop farming violates Twitch's Terms of Service and can
-> get the linked Twitch/Battle.net account actioned. Understand that before running it.
-
 **New here, or on a fresh Windows install? → [SETUP.md](SETUP.md)**
 
 ## What works
