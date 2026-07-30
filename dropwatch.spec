@@ -9,8 +9,13 @@
 
 from PyInstaller.utils.hooks import collect_submodules
 
+# Anything the dashboard loads at runtime has to be listed here. stats.js is
+# fetched by the page rather than inlined, so omitting it yields a frozen build
+# that serves the dashboard with silently missing charts.
+# The .lint.js / .test.js files are dev tooling and deliberately not shipped.
 datas = [
     ("ui/dashboard.html", "ui"),
+    ("ui/stats.js", "ui"),
     ("ui/console.html", "ui"),
     ("config.example.toml", "."),
 ]
