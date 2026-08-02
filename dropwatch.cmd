@@ -25,8 +25,8 @@ echo.
 echo   dropwatch
 echo   ============
 echo.
-echo     1.  Start watching  (opens the dashboard)
-echo     2.  Start watching  (no browser)
+echo     1.  Open the app     (window + tray icon)
+echo     2.  Start watching  (console, no window)
 echo     8.  Start in background (tray icon, closes this window)
 echo     9.  Stop background run
 echo     3.  Log in to Twitch
@@ -39,7 +39,7 @@ echo     Q.  Quit
 echo.
 set /p choice=  Choose:
 
-if /i "%choice%"=="1" goto serve_open
+if /i "%choice%"=="1" goto app
 if /i "%choice%"=="2" goto serve
 if /i "%choice%"=="3" goto login
 if /i "%choice%"=="4" goto doctor
@@ -51,11 +51,11 @@ if /i "%choice%"=="9" goto stopbg
 if /i "%choice%"=="q" exit /b 0
 goto menu
 
-:serve_open
+:app
 cls
-echo   Starting. Ctrl-C to stop, then close this window.
+echo   Opening dropwatch. Closing its window keeps it running in the tray.
 echo.
-"%PY%" -m dropwatch serve --open
+"%PY%" -m dropwatch gui
 goto done
 
 :serve

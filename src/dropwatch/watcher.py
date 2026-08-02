@@ -89,9 +89,14 @@ class Watcher:
         spade: SpadeClient,
         drops: DropsClient,
         pubsub: PubSubClient,
+        account: str = "",
     ) -> None:
         self._cfg_manager = config_manager
         self._bus = bus
+        self._account = account
+        # A logger named for the account, so a combined log stays readable when
+        # several watchers are talking at once. The dashboard shows this name.
+        self._log = get_logger(f"watcher.{account}" if account else "watcher")
         self._store = store
         self._auth = auth
         self._channels = channels
@@ -122,6 +127,16 @@ class Watcher:
     def _cfg(self) -> Any:
         return self._cfg_manager.current
 
+    @property
+    def account(self) -> str:
+        return self._account
+
+    def rename(self, account: str, bus: Any) -> None:
+        """Adopt an identity discovered after construction (a fresh sign-in)."""
+        self._account = account
+        self._bus = bus
+        self._log = get_logger(f"watcher.{account}" if account else "watcher")
+
     def status(self) -> WatcherStatus:
         verdict = self._last_verdict
         return WatcherStatus(
@@ -144,12 +159,12 @@ class Watcher:
         # A previous run that was killed leaves a session row reading "running"
         # forever, which skews every statistic drawn from the table. Close those
         # out before adding to them.
-        recovered = await self._store.reconcile_open_sessions()
+        recovered = await self._store.reconcile_open_sessions(self._account)
         if recovered:
-            log.info("closed %d session(s) left open by an earlier run", recovered)
+            self._log.info("closed %d session(s) left open by an earlier run", recovered)
 
         await self._pubsub.start()
-        log.info("watcher started")
+        self._log.info("watcher started")
         try:
             while not self._stop.is_set():
                 if self._paused:
@@ -159,13 +174,13 @@ class Watcher:
                     await self._tick()
                 except SchemaDriftError as exc:
                     # Retrying cannot help; back off hard and stay loud.
-                    log.error("schema drift: %s", exc)
+                    self._log.error("schema drift: %s", exc)
                     await self._bus.publish(
                         EventType.SCHEMA_DRIFT, operation="watch loop", reason=str(exc)
                     )
                     await self._sleep(120.0)
                 except (GQLError, TimeoutError, OSError) as exc:
-                    log.warning("watch cycle failed: %s", exc)
+                    self._log.warning("watch cycle failed: %s", exc)
                     await self._bus.publish(
                         EventType.ERROR, where="watch loop", error=str(exc)
                     )
@@ -173,7 +188,7 @@ class Watcher:
         finally:
             await self._close_session("watcher stopped")
             await self._pubsub.stop()
-            log.info("watcher stopped")
+            self._log.info("watcher stopped")
 
     async def stop(self) -> None:
         self._stop.set()
@@ -186,7 +201,7 @@ class Watcher:
         await self._close_session("paused")
         await self._pubsub.unwatch_all()
         await self._bus.publish(EventType.WATCH_STOPPED, reason="paused by operator")
-        log.info("watcher paused")
+        self._log.info("watcher paused")
 
     async def resume(self) -> None:
         if not self._paused:
@@ -196,7 +211,7 @@ class Watcher:
         self._target = None
         self._announced_no_targets = False
         await self._bus.publish(EventType.WATCH_STARTED, reason="resumed by operator")
-        log.info("watcher resumed")
+        self._log.info("watcher resumed")
 
     async def _sleep(self, seconds: float) -> None:
         """Interruptible sleep — stop() must not wait out a full poll interval."""
@@ -226,7 +241,7 @@ class Watcher:
         try:
             found = await self._channels.discover()
         except GQLError as exc:
-            log.warning("discovery failed: %s", exc)
+            self._log.warning("discovery failed: %s", exc)
             return None
 
         for info in found:  # already sorted by viewers
@@ -276,7 +291,7 @@ class Watcher:
                 await self._bus.publish(
                     EventType.NO_TARGETS, game=self._cfg.watch.game_slug
                 )
-                log.info("no eligible targets; idling")
+                self._log.info("no eligible targets; idling")
             return
 
         self._announced_no_targets = False
@@ -293,7 +308,7 @@ class Watcher:
         if target.channel_id:
             await self._pubsub.watch_channel(target.channel_id)
 
-        self._stats.session_id = await self._store.start_session(target.login)
+        self._stats.session_id = await self._store.start_session(target.login, self._account)
 
         baseline = await self._read_progress()
         if baseline is not None:
@@ -307,7 +322,7 @@ class Watcher:
             reason=self._select_reason,
             viewers=target.viewers,
         )
-        log.info("watching %s (%s)", target.login, self._select_reason)
+        self._log.info("watching %s (%s)", target.login, self._select_reason)
 
     async def _observe(self) -> Observation:
         """Run one telemetry cycle and gather every signal's input."""
@@ -356,6 +371,7 @@ class Watcher:
                 credited=self._stats.credited_now,
                 required=self._stats.required,
                 state=self._detector.state.value,
+                account=self._account,
             )
 
         return Observation(
@@ -399,13 +415,13 @@ class Watcher:
         except SchemaDriftError:
             raise
         except (GQLError, TimeoutError) as exc:
-            log.debug("stream poll failed: %s", exc)
+            self._log.debug("stream poll failed: %s", exc)
             return None
 
         # Keep the broadcast id current: a reconnecting broadcaster gets a new one,
         # and telemetry against a stale id credits nothing.
         if info.live and info.stream_id and info.stream_id != self._target.stream_id:
-            log.info("%s has a new broadcast id — telemetry retargeted", info.login)
+            self._log.info("%s has a new broadcast id — telemetry retargeted", info.login)
             self._target = info
         return info
 
@@ -416,7 +432,7 @@ class Watcher:
         except SchemaDriftError:
             raise
         except (GQLError, TimeoutError) as exc:
-            log.debug("progress read failed: %s", exc)
+            self._log.debug("progress read failed: %s", exc)
             return None
         if not progress.active:
             return None
@@ -429,14 +445,14 @@ class Watcher:
         outcome is CLAIM_BLOCKED rather than DROP_CLAIMED. The attempt is still
         made once per drop because the code is correct and would simply start
         working if Twitch stopped gating it — but the blocked notice is only
-        emitted once, not every cycle, or it would bury the log.
+        emitted once, not every cycle, or it would bury the self._log.
         """
         try:
             pending = await self._drops.claimable()
         except SchemaDriftError:
             raise
         except (GQLError, TimeoutError) as exc:
-            log.debug("claimable check failed: %s", exc)
+            self._log.debug("claimable check failed: %s", exc)
             return
 
         for drop in pending:
@@ -452,7 +468,7 @@ class Watcher:
                 minutes=drop.current_minutes,
                 required=drop.required_minutes,
             )
-            log.info("reward earned and waiting: %s", drop.reward_name)
+            self._log.info("reward earned and waiting: %s", drop.reward_name)
 
             if not self._cfg.watch.auto_claim:
                 continue
@@ -468,13 +484,13 @@ class Watcher:
                         reason="Twitch requires a Client-Integrity token to claim",
                         where="https://www.twitch.tv/drops/inventory",
                     )
-                    log.warning(
+                    self._log.warning(
                         "cannot auto-claim %s — Twitch gates claiming behind an "
                         "integrity check. Collect it at twitch.tv/drops/inventory",
                         drop.reward_name,
                     )
             except (GQLError, TimeoutError, ValueError) as exc:
-                log.warning("claim failed for %s: %s", drop.reward_name, exc)
+                self._log.warning("claim failed for %s: %s", drop.reward_name, exc)
             else:
                 await self._bus.publish(
                     EventType.DROP_CLAIMED,
@@ -512,7 +528,7 @@ class Watcher:
         if not verdict.changed:
             return
 
-        log.info("%s", verdict.explain())
+        self._log.info("%s", verdict.explain())
         await self._store.record_transition(Transition(
             ts=time.time(),
             channel=self._target.login if self._target else None,
@@ -520,6 +536,7 @@ class Watcher:
             to_state=verdict.state.value,
             reason=verdict.reason,
             signals=verdict.signal_map(),
+            account=self._account,
         ))
         await self._bus.publish(
             EventType.STATE_CHANGED,
@@ -564,7 +581,7 @@ class Watcher:
                 EventType.TARGET_SWITCHED,
                 from_channel=previous, to_channel=None, reason=verdict.reason,
             )
-            log.info("nothing else eligible after %s; idling", previous)
+            self._log.info("nothing else eligible after %s; idling", previous)
             await self._sleep(self._cfg.watch.idle_poll_interval)
             return
 

@@ -1,20 +1,26 @@
 # dropwatch
 
-A Twitch drop campaign miner for Overwatch, with multi-signal stream-end detection
-and a live local dashboard. API-only — no browser, no video decoded, ~30 MB resident.
+A desktop app that farms Twitch drops for Overwatch — on as many accounts as you
+like, at once. API-only: no browser, no video decoded, ~30 MB resident per account.
 
-**New here, or on a fresh Windows install? → [SETUP.md](SETUP.md)**
+**Download `dropwatch.exe`, double-click it, sign in inside the window.** That's
+the whole setup. Closing the window keeps it farming in the tray.
+
+New to this, or on a fresh Windows install? → [SETUP.md](SETUP.md)
 
 ## What works
 
 | | |
 | --- | --- |
+| **Desktop app** | Frameless window, tray icon, close-to-tray, single instance — [details](#the-app) |
+| **Multiple accounts** | Each with its own session, token and watcher, farming simultaneously — [details](#farming-several-accounts) |
+| **Signing in** | Device-code flow inside the app; no terminal needed |
 | **Watching** | Reports minute-watched telemetry; verified crediting against live Twitch |
 | **Stream-end detection** | Five weighted signals with hysteresis — ad breaks and dropped sockets never trigger a rotation |
 | **Rotation** | Switches target when a stream ends or stops crediting, priority list then auto-discovery |
 | **Rewards** | Reads every active campaign's ladder and flags what's earned |
-| **Dashboard** | Live logs over SSE, watch-time charts, reward artwork — served on localhost |
-| **Packaging** | Single-file `.exe`, or a double-click launcher |
+| **Battle.net check** | Detects the unlinked-account trap that silently credits zero minutes |
+| **Packaging** | Single-file `.exe` that is also a full CLI when run from a terminal |
 
 Not built: the Discord control layer. **Auto-claim is impossible** — Twitch gates
 claiming behind an integrity token; see [Rewards and claiming](#rewards-and-claiming).
@@ -24,29 +30,48 @@ found, including the things that turned out not to work.
 
 ## Quick start
 
+**Just want to use it?** Grab `dropwatch.exe` from
+[Releases](https://github.com/9uhm/dropwatch/releases), put it anywhere, and
+double-click. Nothing to install — no Python, no config file, no terminal.
+
+The app opens, shows a code to type at `twitch.tv/activate`, and starts farming
+the moment you approve it. No password ever touches this process. Add more
+accounts from the **+ Add another account** tile whenever you like.
+
+**Running from source instead:**
+
 ```bash
 py -3.14 -m venv .venv
 .venv/Scripts/python -m pip install -e ".[dev]"
 
-cp config.example.toml config.toml     # channel list, intervals, thresholds
-cp .env.example .env                   # DISCORD_TOKEN (unused for now)
-
-.venv/Scripts/python -m dropwatch login    # authorise via twitch.tv/activate
-.venv/Scripts/python -m dropwatch doctor   # what's configured, what's missing
-.venv/Scripts/python -m dropwatch serve --open
+.venv/Scripts/python -m dropwatch       # opens the app, same as the exe
 ```
 
-`login` prints a code to enter at `twitch.tv/activate`, then polls until you
-approve. No password touches this process.
+`config.toml` is optional — without one it uses sensible defaults and
+auto-discovery. Copy `config.example.toml` if you want to pin a channel list.
 
 **Then link Twitch to Battle.net** at <https://www.twitch.tv/settings/connections>.
 Without it Twitch credits zero minutes no matter how long the bot runs — it's the
 single most common reason a working setup earns nothing.
 
+The app checks this for you rather than trusting you remembered: `doctor` reports
+`battle.net link` per account, and the dashboard shows a red banner with a fix
+link if any campaign reports the connection missing. If no campaign is in
+progress there is nothing to check against, and it says so instead of guessing.
+
 ## Commands
+
+You don't need any of these — the app does everything through its window. They
+exist for scripting, for diagnosis, and because a windowed exe run from a terminal
+is still a normal CLI (see [Standalone .exe](#standalone-exe)).
 
 | Command | Purpose |
 | --- | --- |
+| `dropwatch` *(no arguments)* | Open the app — window, tray icon, no console |
+| `dropwatch gui` | The same thing, said explicitly |
+| `dropwatch accounts` | List every account and what it is doing |
+| `dropwatch accounts enable\|disable <name>` | Start or stop one account farming |
+| `dropwatch accounts remove <name> --yes` | Delete an account's token from this machine |
 | `dropwatch serve [--open]` | Run the watcher with the live dashboard on localhost |
 | `dropwatch run` | Run the watcher, console output only |
 | `dropwatch drops [--open]` | Reward ladders and what's claimable |
@@ -56,8 +81,8 @@ single most common reason a working setup earns nothing.
 | `dropwatch watch <channel>` | Watch one fixed target and show what Twitch credits |
 | `dropwatch doctor` | Check local setup; reports exactly what's unconfigured |
 | `dropwatch gql-check` | Validate every GraphQL transport against live Twitch |
-| `dropwatch login [--force]` | Authorise via the device code flow |
-| `dropwatch whoami` | Validate the stored token, show identity and expiry |
+| `dropwatch login [--force] [--account N]` | Authorise an account — adds another if you have some |
+| `dropwatch whoami [--account N]` | Validate a stored token, show identity and expiry |
 | `dropwatch refresh` | Force a token refresh now |
 | `dropwatch logout [--local-only]` | Revoke the token at Twitch and delete it locally |
 | `dropwatch config show [--paths]` | Effective config, and where the files live |
@@ -160,11 +185,29 @@ Tune with `liveness.grace_period`, `liveness.confirm_reads` and
 grace period, and offline weight must exceed online weight — a minority signal can
 never rotate on its own.
 
-## Just run it
+## The app
 
-**Double-click [dropwatch.cmd](dropwatch.cmd).** A menu appears — pick
-*1. Start watching* and the dashboard opens in your browser. No build step; it uses
-the project venv directly. Also does login, doctor, history and the API check.
+Double-clicking the exe — or running `dropwatch` with no arguments from source —
+opens a desktop window. It is the dashboard described below, in a frameless window
+with its own title bar, and it behaves the way a tray app is expected to:
+
+- **Closing the window doesn't quit it.** The close button hides the window and
+  drops it out of the taskbar. Watching carries on; the tray icon stays.
+- **Launching it again brings it back.** A second run finds the copy already
+  running, raises its window, and exits — rather than starting a rival watcher,
+  which would report the same account to Twitch twice.
+- **Quit is explicit**: the tray menu, or the *Quit* button in the window.
+- **Signing in happens in the window** if there's no token yet, so a fresh copy
+  is usable without touching a terminal.
+
+Two loops share the process: the native window owns the main thread and the
+watchers get their own. If WebView2 is missing — it ships with Edge, so this is
+rare — the app still runs headless with its tray icon and opens the dashboard in
+your browser instead.
+
+**From source, there's also [dropwatch.cmd](dropwatch.cmd)** — a double-click menu
+that opens the app, or runs doctor, history and the API check against the project
+venv with no build step.
 
 ### Standalone .exe
 
@@ -174,18 +217,35 @@ For a portable copy with no Python install at all:
 build-exe.cmd            # or: .venv/Scripts/python -m PyInstaller dropwatch.spec --noconfirm
 ```
 
-Produces `dist/dropwatch.exe` — one file, ~16 MB. Copy it anywhere and:
+Produces `dist/dropwatch.exe` — one file. Copy it anywhere and **double-click it**:
+the app opens, and signing in happens in the window.
+
+From a terminal the same exe is still a normal CLI:
 
 ```
-dropwatch.exe login      once, to authorise
-dropwatch.exe serve      watch, with the dashboard
+dropwatch.exe doctor     check the install
+dropwatch.exe serve      watch with a console instead of a window
 ```
 
-**It keeps its state beside itself.** `data/`, `config.toml` and `.env` are read
-from and written to the exe's own folder, so you can drop it on a USB stick or in
-`C:\Tools\` and it stays self-contained. `config.toml` is optional — without one it
-uses defaults with auto-discovery. Relocate state with `DROPWATCH_HOME` if you'd
-rather.
+That works because the exe is built console-mode with PyInstaller's
+`hide_console="hide-early"`, which only hides a console the process *created
+itself*. Double-clicked, there is no console window at all; run from an existing
+`cmd`, output goes to that window as usual.
+
+**State lives in `%LOCALAPPDATA%\dropwatch`.** `data/`, `config.toml` and `.env`
+are kept there rather than beside the executable, so the exe is just a file — put
+it on the Desktop, move it, replace it with a new build, and your tokens and
+history stay put. (Writing beside the exe also fails outright under
+`Program Files`, and leaves a database in whatever folder you downloaded it to.)
+
+`config.toml` is seeded from the bundled example on first run and is optional —
+without one it uses defaults with auto-discovery.
+
+**Portable mode** if you want the old behaviour: drop an empty file named
+`dropwatch.portable` next to the exe, or keep a `data/` folder there. Either one
+makes it use its own folder instead, so a USB-stick install keeps working and an
+existing beside-the-exe install is never silently abandoned. `DROPWATCH_HOME`
+overrides everything.
 
 The dashboard HTML is bundled *inside* the exe, but a `ui/` folder placed next to
 it wins, so it can be re-skinned without a rebuild.
@@ -194,6 +254,39 @@ Two things worth knowing before you distribute it: the exe is unsigned, so
 SmartScreen will warn on first run (More info → Run anyway), and PyInstaller
 binaries draw occasional false positives from antivirus. UPX compression is
 deliberately off in the spec because it makes that markedly worse.
+
+## Farming several accounts
+
+```bash
+dropwatch login          # again — adds a second account, keeps the first
+dropwatch accounts       # who is farming, and what each one is doing
+```
+
+Or use the **+ Add another account** tile in the app. Either way the accounts
+already running keep running while you authorise the new one.
+
+Each account is fully separate: its own HTTP session, token, telemetry stream,
+PubSub connection and watcher. Nothing identifying is shared, because Twitch
+credits watch time to whoever sent it — one session spanning two logins would
+credit the wrong account.
+
+They pick targets **independently**, so they normally all land on the same
+stream. That is the point: drops accrue per account, so three accounts watching
+one channel earn three times.
+
+| | |
+| --- | --- |
+| Tokens | `data/accounts/<login>.json`, one file per account |
+| History | every `watch_session`, sample and transition carries an `account` |
+| Disable | keeps the token, stops the farming — `accounts disable <name>` |
+| Remove | deletes the local token only; revoke at Twitch with `logout --account` |
+
+Upgrading from a single-account install migrates `data/tokens.json` into
+`data/accounts/` automatically, keeping the old file as `.migrated`.
+
+The dashboard shows one card per account with its state, target and credited
+minutes, and tags every log line with the account that produced it. The
+**Rewards** ladder is read for one account at a time and says which.
 
 ## Rewards and claiming
 
@@ -246,11 +339,17 @@ dropwatch stop               # stop a detached run
 reporting success** — otherwise a port conflict would look like a clean launch, since
 the detached process has nowhere to print its error.
 
-A **system-tray icon** is what makes that controllable: right-click for *Open
-dashboard*, *Open twitch.tv/&lt;channel&gt;*, *Pause* / *Resume*, and *Quit*. Its labels
-track the live state, so it shows the current target and whether watching is paused.
-Double-click opens the dashboard. Disable with `--no-tray` or `ui.tray = false` —
-though a detached run then has no controls except `dropwatch stop`.
+A **system-tray icon** is what makes that controllable: right-click for *Show
+window* (or *Open dashboard*, without one), *Hide window*, *Open
+twitch.tv/&lt;channel&gt;*, *Pause* / *Resume*, and *Quit*. Its labels track the live
+state, so it shows the current target and whether watching is paused. Double-click
+brings the window back. Disable with `--no-tray` or `ui.tray = false` — though a
+detached run then has no controls except `dropwatch stop`.
+
+The icon is drawn at runtime rather than loaded, so it cannot go missing from a
+bundle. `packaging/make_icon.py` bakes the identical drawing into
+`packaging/dropwatch.ico` for the two places Windows insists on a file: the
+executable and the taskbar. Re-run it after editing `desktop.icon_image`.
 
 ## Settings
 
@@ -284,7 +383,11 @@ can't drive the unauthenticated local endpoint.
 CLI flags still win for a single run: `--host`, `--port`, `--open`, `--open-twitch`,
 `--no-open-twitch`, `--no-tray`.
 
-## Live dashboard
+## The dashboard
+
+This is what the app window shows; `serve` puts the identical page in a browser.
+
+
 
 ```bash
 dropwatch serve                    # watcher + dashboard on http://127.0.0.1:8787

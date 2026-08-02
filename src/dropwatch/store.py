@@ -20,7 +20,14 @@ from .log import get_logger
 
 log = get_logger("store")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+#: Rows written before multi-account support existed belong to *an* account, but
+#: not one the database recorded. They are backfilled with this rather than the
+#: migrating install's login: guessing a name would silently attribute someone
+#: else's history to a real account, and a distinct marker keeps the old totals
+#: visible without claiming they came from anywhere in particular.
+LEGACY_ACCOUNT = "(before accounts)"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS config_override (
@@ -77,7 +84,26 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Only the *preference*, not the account list: an account exists because its
+-- token file exists (see accounts.py). A row here for a name with no token file
+-- is harmless and gets cleaned up when the account is removed.
+CREATE TABLE IF NOT EXISTS account_pref (
+    name       TEXT PRIMARY KEY,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    updated_at REAL NOT NULL
+);
 """
+
+#: Added in v3. Nullable and backfilled rather than NOT NULL, because ALTER TABLE
+#: cannot add a NOT NULL column without a default and the backfill is what gives
+#: the old rows meaning.
+_ACCOUNT_COLUMNS = (
+    ("watch_session", "account"),
+    ("watch_sample", "account"),
+    ("state_transition", "account"),
+    ("drop_claim", "account"),
+)
 
 
 @dataclass(slots=True)
@@ -88,6 +114,9 @@ class Transition:
     to_state: str
     reason: str | None
     signals: dict[str, Any]
+    #: Which account this transition belongs to. Defaulted so existing callers
+    #: and tests keep working; the watcher always sets it.
+    account: str = ""
 
 
 class Store:
@@ -129,9 +158,37 @@ class Store:
         # only needed for changes that alter or backfill existing rows.
         if current < 2:
             log.info("migrating database v%d -> v2 (watch samples)", current)
+        if current < 3:
+            log.info("migrating database v%d -> v3 (per-account history)", current)
+            self._add_account_columns()
 
         self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         log.info("database schema at v%d", SCHEMA_VERSION)
+
+    def _add_account_columns(self) -> None:
+        """Tag every historical row with an account.
+
+        Idempotent by inspection rather than by ``IF NOT EXISTS``, which SQLite's
+        ALTER TABLE does not support — a re-run on an already-migrated database
+        would otherwise abort the whole open with "duplicate column name".
+        """
+        assert self._conn is not None
+        for table, column in _ACCOUNT_COLUMNS:
+            existing = {
+                row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})")
+            }
+            if column in existing:
+                continue
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+            self._conn.execute(
+                f"UPDATE {table} SET {column}=? WHERE {column} IS NULL", (LEGACY_ACCOUNT,)
+            )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_account ON watch_session(account)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sample_account ON watch_sample(account)"
+        )
 
     async def close(self) -> None:
         if self._conn is None:
@@ -186,14 +243,14 @@ class Store:
 
     # -------------------------------------------------------------- sessions
 
-    async def start_session(self, channel: str) -> int:
+    async def start_session(self, channel: str, account: str = "") -> int:
         async with self._lock:
             conn = self._require()
 
             def run() -> int:
                 cur = conn.execute(
-                    "INSERT INTO watch_session(channel, started_at) VALUES(?,?)",
-                    (channel, time.time()),
+                    "INSERT INTO watch_session(channel, started_at, account) VALUES(?,?,?)",
+                    (channel, time.time(), account),
                 )
                 conn.commit()
                 return int(cur.lastrowid or 0)
@@ -212,12 +269,19 @@ class Store:
         )
         return [dict(r) for r in rows]
 
-    async def open_sessions(self) -> list[dict[str, Any]]:
+    async def open_sessions(self, account: str | None = None) -> list[dict[str, Any]]:
         """Sessions left dangling by a crash — reconciled on startup."""
-        rows = await self._read("SELECT * FROM watch_session WHERE ended_at IS NULL")
+        if account is None:
+            rows = await self._read("SELECT * FROM watch_session WHERE ended_at IS NULL")
+        else:
+            rows = await self._read(
+                "SELECT * FROM watch_session WHERE ended_at IS NULL "
+                "AND COALESCE(account,'')=?",
+                (account,),
+            )
         return [dict(r) for r in rows]
 
-    async def reconcile_open_sessions(self) -> int:
+    async def reconcile_open_sessions(self, account: str | None = None) -> int:
         """Close sessions a crash or kill left open, and recover their minutes.
 
         A killed process never reaches ``end_session``, leaving a row reading
@@ -225,7 +289,10 @@ class Store:
         drawn from the table, so it's closed on the next startup using the last
         sample as the end time and minute count — the best evidence available.
         """
-        dangling = await self.open_sessions()
+        # Scoped to one account: several watchers reconcile at the same moment on
+        # startup, and an unscoped sweep would let the first one close sessions
+        # the others are about to reopen — or, worse, ones they still hold.
+        dangling = await self.open_sessions(account)
         if not dangling:
             return 0
 
@@ -266,12 +333,14 @@ class Store:
         credited: int | None,
         required: int | None,
         state: str | None,
+        account: str = "",
     ) -> None:
         await self._write(
             "INSERT INTO watch_sample"
-            "(ts, session_id, channel, minutes_sent, credited, required, state) "
-            "VALUES(?,?,?,?,?,?,?)",
-            (time.time(), session_id, channel, minutes_sent, credited, required, state),
+            "(ts, session_id, channel, minutes_sent, credited, required, state, account) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (time.time(), session_id, channel, minutes_sent, credited, required,
+             state, account),
         )
 
     async def samples(self, since: float | None = None, limit: int = 2000) -> list[dict[str, Any]]:
@@ -307,6 +376,36 @@ class Store:
             (cutoff,),
         )
         return [dict(r) for r in rows]
+
+    async def account_totals(self, days: int = 30) -> list[dict[str, Any]]:
+        """Minutes reported per account. The headline number for a fleet."""
+        cutoff = time.time() - days * 86400
+        rows = await self._read(
+            "SELECT COALESCE(account, '') AS account, SUM(minutes) AS minutes, "
+            "       COUNT(*) AS sessions "
+            "FROM watch_session WHERE started_at >= ? "
+            "GROUP BY account ORDER BY minutes DESC",
+            (cutoff,),
+        )
+        return [dict(r) for r in rows]
+
+    # -------------------------------------------------- account preferences
+
+    async def disabled_accounts(self) -> set[str]:
+        rows = await self._read("SELECT name FROM account_pref WHERE enabled=0")
+        return {r["name"] for r in rows}
+
+    async def set_account_enabled(self, name: str, enabled: bool) -> None:
+        await self._write(
+            "INSERT INTO account_pref(name, enabled, updated_at) VALUES(?,?,?) "
+            "ON CONFLICT(name) DO UPDATE SET enabled=excluded.enabled, "
+            "updated_at=excluded.updated_at",
+            (name, 1 if enabled else 0, time.time()),
+        )
+
+    async def forget_account(self, name: str) -> None:
+        """Drop the preference row. History rows are kept: the minutes were real."""
+        await self._write("DELETE FROM account_pref WHERE name=?", (name,))
 
     async def transition_counts(self, days: int = 30) -> list[dict[str, Any]]:
         cutoff = time.time() - days * 86400
@@ -351,9 +450,11 @@ class Store:
 
     async def record_transition(self, t: Transition) -> None:
         await self._write(
-            "INSERT INTO state_transition(ts, channel, from_state, to_state, reason, signals) "
-            "VALUES(?,?,?,?,?,?)",
-            (t.ts, t.channel, t.from_state, t.to_state, t.reason, json.dumps(t.signals)),
+            "INSERT INTO state_transition"
+            "(ts, channel, from_state, to_state, reason, signals, account) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (t.ts, t.channel, t.from_state, t.to_state, t.reason,
+             json.dumps(t.signals), t.account),
         )
 
     async def recent_transitions(self, limit: int = 20) -> list[Transition]:
@@ -374,6 +475,7 @@ class Store:
                     to_state=r["to_state"],
                     reason=r["reason"],
                     signals=signals,
+                    account=(r["account"] if "account" in r.keys() else "") or "",
                 )
             )
         return out

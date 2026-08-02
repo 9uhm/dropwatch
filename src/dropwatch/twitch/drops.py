@@ -103,6 +103,15 @@ class Campaign:
     ends_at: datetime | None = None
     drops: list[Drop] = field(default_factory=list)
 
+    #: Whether the external account this campaign requires (Battle.net, for
+    #: Overwatch) is linked to this Twitch account. ``None`` means Twitch did not
+    #: say -- an older hash, or a campaign with no connection requirement -- and
+    #: is deliberately distinct from ``False``, because "we don't know" must not
+    #: be reported as "you are not linked".
+    account_connected: bool | None = None
+    #: Where to go and fix it. Publisher-specific, so it comes from Twitch.
+    account_link_url: str | None = None
+
     @property
     def claimable(self) -> list[Drop]:
         return [d for d in self.drops if d.claimable]
@@ -239,11 +248,36 @@ class DropsClient:
                 starts_at=_parse_ts(pluck(entry, "startAt", default=None)),
                 ends_at=_parse_ts(pluck(entry, "endAt", default=None)),
                 drops=drops,
+                account_connected=pluck(entry, "self", "isAccountConnected",
+                                        default=None),
+                account_link_url=pluck(entry, "accountLinkURL", default=None),
             ))
 
         # Soonest to expire first: that's the one worth watching for.
         campaigns.sort(key=lambda c: (c.ends_at is None, c.ends_at))
         return campaigns
+
+    @staticmethod
+    def link_status(campaigns: list[Campaign]) -> tuple[bool | None, str | None]:
+        """Is the required external account linked? ``(verdict, fix_url)``.
+
+        ``True``  -- at least one campaign confirms the connection.
+        ``False`` -- a campaign says outright that it is missing.
+        ``None``  -- unknowable right now, which is *not* the same as False.
+
+        The None case is the honest answer when there are no campaigns in
+        progress: an unlinked account and an account with nothing active look
+        identical from here, and guessing would produce a scary banner for
+        someone whose setup is fine and simply between campaigns.
+        """
+        known = [c for c in campaigns if c.account_connected is not None]
+        if not known:
+            return None, None
+        missing = [c for c in known if not c.account_connected]
+        if missing:
+            url = next((c.account_link_url for c in missing if c.account_link_url), None)
+            return False, url
+        return True, None
 
     async def claimable(self) -> list[Drop]:
         """Every earned-but-uncollected drop, across all campaigns."""

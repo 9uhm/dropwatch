@@ -31,9 +31,15 @@ if errorlevel 1 (
 echo.
 echo   Built  dist\dropwatch.exe
 echo.
-echo   It keeps its state beside itself, so copy the exe wherever you want and run:
-echo     dropwatch.exe login      once, to authorise
-echo     dropwatch.exe serve      to watch, with the dashboard
+echo   It keeps its state beside itself, so copy the exe wherever you want.
+echo.
+echo   Just double-click it. The app opens, and signing in happens in the window.
+echo   Closing the window keeps it watching in the tray; double-click again to
+echo   bring it back. Right-click the tray icon to pause or quit.
+echo.
+echo   From a terminal it is still a normal CLI:
+echo     dropwatch.exe doctor     check the install
+echo     dropwatch.exe serve      watch with a console instead of a window
 echo.
 echo   config.toml is optional -- without one it uses defaults and auto-discovery.
 echo.

@@ -39,6 +39,7 @@ from .desktop import (
     write_pid,
 )
 from .events import Event, EventType
+from .log import attach_parent_console
 from .store import Store
 from .twitch.auth import AuthError, AuthNeededError, TokenSet
 from .twitch.drops import SessionProgress
@@ -72,13 +73,25 @@ def _fmt_duration(seconds: float) -> str:
 
 async def cmd_login(args: argparse.Namespace) -> int:
     async with App() as app:
-        if app.auth.authenticated and not args.force:
-            tokens = app.auth.tokens
+        # With accounts already set up, `login` means "add another one" — the
+        # alternative is overwriting a working account by typing one command.
+        target = app.get(args.account) if args.account else None
+        if args.account and target is None:
+            print(f"No account named {args.account!r}.", file=sys.stderr)
+            return EXIT_ERROR
+        if target is None:
+            target = app.primary if not app.primary.authenticated else None
+        if target is None:
+            target = await app.add_account("")
+            print("\n  Adding another account. The existing ones keep farming.")
+
+        if target.authenticated and not args.force:
+            tokens = target.auth.tokens
             assert tokens is not None
             print(f"Already authenticated as {tokens.login}. Use --force to re-login.")
             return EXIT_OK
 
-        flow = await app.auth.start_device_flow()
+        flow = await target.auth.start_device_flow()
         print()
         print("  Authorise this bot on Twitch:")
         print()
@@ -88,34 +101,45 @@ async def cmd_login(args: argparse.Namespace) -> int:
         print(f"  Waiting for approval (expires in {_fmt_duration(flow.seconds_remaining)})...")
 
         try:
-            await app.auth.complete_device_flow(flow)
+            await target.auth.complete_device_flow(flow)
         except AuthError as exc:
             print(f"\n  Login failed: {exc}", file=sys.stderr)
             return EXIT_ERROR
 
-        tokens = app.auth.tokens
+        tokens = target.auth.tokens
         assert tokens is not None
+        name = (tokens.login or "").lower()
+        if name:
+            target.claim(name)
+            await app.registry.set_enabled(name, True)
         print(f"\n  Authenticated as {tokens.login} (user id {tokens.user_id})")
         print(f"  Token {_fmt_expiry(tokens)}")
-        print(f"  Stored at {paths.TOKEN_PATH}")
+        print(f"  Stored at {paths.token_path(name) if name else paths.ACCOUNTS_DIR}")
+        total = len(app.registry.enabled())
+        if total > 1:
+            print(f"  {total} accounts will farm together.")
         return EXIT_OK
 
 
-async def cmd_whoami(_: argparse.Namespace) -> int:
+async def cmd_whoami(args: argparse.Namespace) -> int:
     async with App() as app:
-        tokens = app.auth.tokens
+        account = app.get(getattr(args, "account", None))
+        if account is None:
+            print(f"No account named {args.account!r}.", file=sys.stderr)
+            return EXIT_ERROR
+        tokens = account.auth.tokens
         if tokens is None:
             print("Not authenticated. Run `dropwatch login`.")
             return EXIT_ERROR
 
         # Round-trip to Twitch so this reports reality, not just what's on disk.
         try:
-            await app.auth.validate()
+            await account.auth.validate()
         except AuthError as exc:
             print(f"Stored token is not valid: {exc}", file=sys.stderr)
             return EXIT_ERROR
 
-        tokens = app.auth.tokens
+        tokens = account.auth.tokens
         assert tokens is not None
         fraction = app.config.twitch.refresh_at_lifetime_fraction
         print(f"  Login        {tokens.login}")
@@ -142,10 +166,14 @@ async def cmd_refresh(_: argparse.Namespace) -> int:
 
 async def cmd_logout(args: argparse.Namespace) -> int:
     async with App() as app:
-        had_token = app.auth.authenticated
-        login = app.auth.tokens.login if app.auth.tokens else None
+        account = app.get(getattr(args, "account", None))
+        if account is None:
+            print(f"No account named {args.account!r}.", file=sys.stderr)
+            return EXIT_ERROR
+        had_token = account.auth.authenticated
+        login = account.auth.tokens.login if account.auth.tokens else None
 
-        revoked = await app.auth.logout(revoke=not args.local_only)
+        revoked = await account.auth.logout(revoke=not args.local_only)
 
         if not had_token:
             print("No stored token — nothing to remove.")
@@ -173,16 +201,19 @@ async def cmd_config(args: argparse.Namespace) -> int:
 
         if args.config_action == "show":
             overrides = manager.overrides
+            manager_accounts = app.registry.list()
             print()
             if args.paths:
                 print("  Where everything lives")
                 print(f"  {'-' * 68}")
+                accounts = ", ".join(a.name for a in manager_accounts) or "none yet"
                 for label, path, note in (
                     ("state root", paths.ROOT, "DROPWATCH_HOME overrides this"),
                     ("config.toml", paths.CONFIG_FILE, "editable defaults"),
                     (".env", paths.ENV_FILE, "secrets only — DISCORD_TOKEN"),
                     ("database", paths.DB_PATH, "sessions, transitions, overrides"),
-                    ("tokens", paths.TOKEN_PATH, "OAuth tokens, locked to your user"),
+                    ("accounts", paths.ACCOUNTS_DIR,
+                     f"one token file per account — {accounts}"),
                 ):
                     mark = "ok" if path.exists() else "--"
                     print(f"  [{mark}] {label:<12} {path}")
@@ -286,6 +317,31 @@ async def cmd_doctor(_: argparse.Namespace) -> int:
                   else f"could not resolve from Twitch; using fallback {spade_url}")
         except (TimeoutError, OSError) as exc:
             check("telemetry endpoint", False, str(exc))
+
+        # The one that silently earns nothing. Checked per account, because with
+        # a fleet it is entirely normal for one to be linked and another not.
+        for account in app.accounts:
+            if not account.ready:
+                continue
+            try:
+                campaigns = await account.drops.inventory()
+            except (GQLError, AuthError, TimeoutError) as exc:
+                check(f"battle.net link ({account.name})", False,
+                      f"could not read inventory: {type(exc).__name__}")
+                continue
+            linked, fix = account.drops.link_status(campaigns)
+            label = f"battle.net link ({account.name})" if len(app.accounts) > 1 \
+                else "battle.net link"
+            if linked is True:
+                check(label, True, "connected — drops can be credited")
+            elif linked is False:
+                check(label, False,
+                      f"NOT linked — Twitch will credit 0 minutes. Fix: {fix}")
+            else:
+                # No campaign in progress says either way. Saying "not linked"
+                # here would alarm someone whose setup is simply between
+                # campaigns, so report the uncertainty as uncertainty.
+                print(f"  [--] {label:<28} no active campaign to check against")
 
         channels = cfg.watch.ordered()
         check("watch targets", bool(channels) or cfg.watch.auto_discovery,
@@ -692,15 +748,11 @@ async def cmd_drops(args: argparse.Namespace) -> int:
 
 
 async def cmd_serve(args: argparse.Namespace) -> int:
-    """Run the watcher with a local web dashboard streaming its real logs."""
+    """Run every enabled account with a local web dashboard over all of them."""
     async with App() as app:
-        if not app.auth.authenticated:
-            print("Not authenticated — run `dropwatch login` first.", file=sys.stderr)
-            return EXIT_ERROR
-        tokens = app.auth.tokens
-        assert tokens is not None
-        if not tokens.user_id:
-            print("Stored token has no user id — re-run `dropwatch login`.", file=sys.stderr)
+        farming = app.ready_accounts()
+        if not farming:
+            print("No account is signed in — run `dropwatch login` first.", file=sys.stderr)
             return EXIT_ERROR
 
         ui = app.config.ui
@@ -713,7 +765,7 @@ async def cmd_serve(args: argparse.Namespace) -> int:
 
         dashboard = Dashboard(
             watcher=app.watcher, bus=app.bus, store=app.store, drops=app.drops,
-            config=app.config_manager,
+            config=app.config_manager, auth=app.auth, app=app,
         )
         try:
             url = await dashboard.start(host, port)
@@ -724,37 +776,62 @@ async def cmd_serve(args: argparse.Namespace) -> int:
             return EXIT_ERROR
 
         print(f"\n  Dashboard  {url}")
-        print(f"  Account    {tokens.login} (id {tokens.user_id})")
+        print("  Accounts   " + ", ".join(
+            f"{a.name}({a.auth.tokens.user_id})" for a in farming if a.auth.tokens
+        ))
         print("  Targets    " + (", ".join(
             f"{c.login}({c.priority})" for c in app.config.watch.ordered()
         ) or "none configured"))
 
         # Open on every target pick rather than once at startup: after a rotation
-        # the old tab is showing a stream that has ended.
-        opened_once = False
+        # the old tab is showing a stream that has ended. Tracked per account, or
+        # a fleet would only ever open a tab for whichever one started first.
+        opened: set[str] = set()
 
         async def on_watch_started(event: Event) -> None:
-            nonlocal opened_once
             channel = event.get("channel")
             if not channel or not open_twitch:
                 return
-            if opened_once and not app.config.ui.reopen_twitch_on_rotate:
+            who = str(event.get("account") or "")
+            if who in opened and not app.config.ui.reopen_twitch_on_rotate:
                 return
-            opened_once = True
+            opened.add(who)
             open_channel(str(channel))
 
         app.bus.subscribe(on_watch_started, EventType.WATCH_STARTED)
 
         tray: Tray | None = None
         if want_tray:
+            async def pause_all() -> None:
+                for account in farming:
+                    await account.watcher.pause()
+
+            async def resume_all() -> None:
+                for account in farming:
+                    await account.watcher.resume()
+
+            async def stop_all() -> None:
+                for account in farming:
+                    await account.watcher.stop()
+
+            def describe() -> str | None:
+                live = [a.watcher.status().channel for a in farming
+                        if a.watcher.status().channel]
+                if not live:
+                    return None
+                unique = sorted(set(live))
+                if len(unique) == 1:
+                    return unique[0] if len(live) == 1 else f"{unique[0]} ×{len(live)}"
+                return f"{len(live)} accounts, {len(unique)} channels"
+
             tray = Tray(
                 loop=asyncio.get_running_loop(),
                 dashboard_url=url,
-                on_pause=app.watcher.pause,
-                on_resume=app.watcher.resume,
-                on_quit=app.watcher.stop,
-                current_channel=lambda: app.watcher.status().channel,
-                is_paused=lambda: app.watcher.status().paused,
+                on_pause=pause_all,
+                on_resume=resume_all,
+                on_quit=stop_all,
+                current_channel=describe,
+                is_paused=lambda: all(a.watcher.status().paused for a in farming),
             )
             if tray.start():
                 # Keep the menu labels truthful as target and state change.
@@ -773,18 +850,27 @@ async def cmd_serve(args: argparse.Namespace) -> int:
             open_url(url, what="dashboard")
 
         write_pid()
-        task = asyncio.create_task(app.watcher.run(), name="watcher")
+        tasks = [
+            asyncio.create_task(a.watcher.run(), name=f"watcher:{a.name}")
+            for a in farming
+        ]
+        combined = asyncio.gather(*tasks)
+
+        async def stop_watchers() -> None:
+            for account in farming:
+                await account.watcher.stop()
+
         try:
             if args.duration:
                 with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(asyncio.shield(task), timeout=args.duration)
-                await app.watcher.stop()
-            await task
+                    await asyncio.wait_for(asyncio.shield(combined), timeout=args.duration)
+                await stop_watchers()
+            await combined
         except (KeyboardInterrupt, asyncio.CancelledError):
             print("\n  Stopping...")
-            await app.watcher.stop()
+            await stop_watchers()
             with contextlib.suppress(asyncio.CancelledError):
-                await task
+                await combined
         finally:
             if tray is not None:
                 tray.stop()
@@ -799,6 +885,71 @@ async def cmd_serve(args: argparse.Namespace) -> int:
             print(f"  Twitch credited {gain:+d} minute(s) "
                   f"({s.stats.credited_start} -> {s.stats.credited_now}).")
         return EXIT_OK
+
+
+async def cmd_accounts(args: argparse.Namespace) -> int:
+    """List, enable, disable or forget the accounts that farm together."""
+    async with App() as app:
+        registry = app.registry
+        action = args.accounts_action or "list"
+
+        if action == "list":
+            entries = registry.list()
+            if not entries:
+                print("\n  No accounts yet. Add one with:  dropwatch login\n")
+                return EXIT_OK
+            print()
+            print(f"  {'account':<24} {'state':<10} {'status'}")
+            print(f"  {'-' * 24} {'-' * 10} {'-' * 34}")
+            for entry in entries:
+                live = app.get(entry.name)
+                if not entry.usable:
+                    status = "token unreadable — re-run `dropwatch login`"
+                elif live is not None and live.ready:
+                    st = live.watcher.status()
+                    status = f"{st.state.lower()}" + (f" {st.channel}" if st.channel else "")
+                else:
+                    status = "not loaded"
+                print(f"  {entry.name:<24} "
+                      f"{'enabled' if entry.enabled else 'disabled':<10} {status}")
+            print(f"\n  {len(registry.enabled())} of {len(entries)} enabled. "
+                  f"Each farms independently.\n")
+            return EXIT_OK
+
+        name = (args.name or "").lower()
+        known = registry.names()
+        if name not in known:
+            print(f"No account named {name!r}. Known: {', '.join(known) or 'none'}",
+                  file=sys.stderr)
+            return EXIT_ERROR
+
+        if action in ("enable", "disable"):
+            await registry.set_enabled(name, action == "enable")
+            print(f"  {name} {action}d.")
+            return EXIT_OK
+
+        if action == "remove":
+            if not args.yes:
+                print(f"\n  This deletes the stored token for {name!r} from this machine.")
+                print("  Its watch history is kept. The Twitch grant is left alone —")
+                print(f"  revoke that with:  dropwatch logout --account {name}\n")
+                print("  Re-run with --yes to confirm.")
+                return EXIT_ERROR
+            await registry.remove(name)
+            print(f"  Removed {name}.")
+            return EXIT_OK
+
+        return EXIT_ERROR
+
+
+async def cmd_gui(_: argparse.Namespace) -> int:
+    """Placeholder so ``gui`` appears in help and parses like every other command.
+
+    Never actually awaited: :func:`main` intercepts ``gui`` before the event loop
+    is created, because the GUI has to own the main thread and cannot run inside
+    one that ``asyncio.run`` already occupies.
+    """
+    raise AssertionError("gui is dispatched from main(), not the event loop")
 
 
 async def cmd_help(_: argparse.Namespace) -> int:
@@ -890,13 +1041,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"dropwatch {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_login = sub.add_parser("login", help="authorise via the Twitch device code flow")
+    p_login = sub.add_parser(
+        "login",
+        help="authorise an account (adds another one if you already have some)",
+    )
     p_login.add_argument("--force", action="store_true", help="re-login even if already authorised")
+    p_login.add_argument("--account", default=None,
+                         help="re-authorise this existing account instead of adding one")
     p_login.set_defaults(func=cmd_login)
 
-    sub.add_parser("whoami", help="show the stored token's identity and expiry").set_defaults(
-        func=cmd_whoami
-    )
+    p_whoami = sub.add_parser("whoami", help="show a stored token's identity and expiry")
+    p_whoami.add_argument("--account", default=None, help="which account (default: the first)")
+    p_whoami.set_defaults(func=cmd_whoami)
+
+    p_acc = sub.add_parser("accounts", help="list and manage the accounts that farm together")
+    acc_sub = p_acc.add_subparsers(dest="accounts_action")
+    acc_sub.add_parser("list", help="show every account and what it is doing")
+    for verb, blurb in (
+        ("enable", "let this account farm again"),
+        ("disable", "stop this account farming, keeping its token"),
+        ("remove", "delete this account's stored token from this machine"),
+    ):
+        sp = acc_sub.add_parser(verb, help=blurb)
+        sp.add_argument("name")
+        if verb == "remove":
+            sp.add_argument("--yes", action="store_true", help="skip the confirmation")
+    p_acc.set_defaults(func=cmd_accounts, name=None, yes=False)
     sub.add_parser("refresh", help="force a token refresh now").set_defaults(func=cmd_refresh)
     p_logout = sub.add_parser(
         "logout", help="revoke the Twitch token and delete it locally"
@@ -905,6 +1075,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--local-only", action="store_true",
         help="only delete the local file, leaving the token valid at Twitch",
     )
+    p_logout.add_argument("--account", default=None, help="which account (default: the first)")
     p_logout.set_defaults(func=cmd_logout)
     sub.add_parser("doctor", help="check local setup").set_defaults(func=cmd_doctor)
 
@@ -975,6 +1146,13 @@ def build_parser() -> argparse.ArgumentParser:
                          help="run in the background with no console window")
     p_serve.set_defaults(func=cmd_serve)
 
+    p_gui = sub.add_parser(
+        "gui", help="run as a desktop app: a window, a tray icon, and no console"
+    )
+    p_gui.add_argument("--host", default=None, help="bind address; overrides ui.host")
+    p_gui.add_argument("--port", type=int, default=None, help="overrides ui.port")
+    p_gui.set_defaults(func=cmd_gui)
+
     sub.add_parser(
         "stop", help="stop a detached background run"
     ).set_defaults(func=cmd_stop)
@@ -1003,6 +1181,33 @@ async def _resolve_bind(args: argparse.Namespace) -> tuple[str, int]:
     return args.host or ui.host, args.port or ui.port
 
 
+def _run_gui(args: argparse.Namespace) -> int:
+    """Launch the desktop app, or hand the launch to the copy already running.
+
+    The second double-click is the interesting case. Two watchers reporting the
+    same account to Twitch is worse than one, so rather than starting a rival —
+    or failing with "port in use", which reads as a bug — this finds the live
+    instance, tells it to show itself, and exits quietly.
+    """
+    from . import gui, ipc
+
+    host, port = asyncio.run(_resolve_bind(args))
+
+    running = ipc.show_running_instance(host, port)
+    if running is not None:
+        if running.get("windowed"):
+            print(f"\n  dropwatch is already running (pid {running.get('pid')}).")
+            print("  Brought its window to the front.\n")
+        else:
+            # A headless `serve` holds the port. Nothing to raise, so say where
+            # the dashboard is rather than pretending something happened.
+            print(f"\n  dropwatch is already running (pid {running.get('pid')}).")
+            print(f"  It has no app window — open  {ipc.base_url(host, port)}/\n")
+        return EXIT_OK
+
+    return gui.run(args, host=host, port=port)
+
+
 def main(argv: list[str] | None = None) -> int:
     # Windows consoles still default to a legacy codepage; without this the
     # em dashes and box characters in our output become mojibake.
@@ -1010,6 +1215,12 @@ def main(argv: list[str] | None = None) -> int:
     # line_buffering matters for `watch`, which prints one line a minute for
     # hours: redirected to a file or a pipe, stdout would otherwise buffer and
     # show nothing at all until the process exited.
+    # The packaged app is a windowed binary, so it starts with no stdout at all.
+    # Borrow the launching terminal's console when there is one, or CLI commands
+    # typed into cmd would print nothing. No console means launched from Explorer
+    # or the tray, where printing nowhere is the right answer.
+    attach_parent_console()
+
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
@@ -1017,7 +1228,18 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
     raw = list(sys.argv[1:] if argv is None else argv)
-    args = build_parser().parse_args(argv)
+
+    # A bare launch is a double-click, not someone who forgot the arguments.
+    # `dropwatch help` still prints the command list for anyone in a terminal.
+    if not raw:
+        raw = ["gui"]
+
+    args = build_parser().parse_args(raw)
+
+    # Before the event loop, because the native message pump must own the main
+    # thread and asyncio.run() would already have claimed it.
+    if args.command == "gui":
+        return _run_gui(args)
 
     # Handled before the event loop exists: detaching means spawning a fresh
     # process and exiting, so there's nothing for this one to run.

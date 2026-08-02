@@ -130,6 +130,42 @@
   @media (max-width: 640px) { .metrics { grid-template-columns: repeat(2,1fr); } }
 
   /* ----------------------------------------------------------------- rewards */
+  /* The failure everything else looks healthy through: telemetry accepted,
+     state WATCHING, zero minutes credited. Loud on purpose. */
+  .link-banner {
+    display: none; align-items: center; gap: 11px;
+    margin: 0 0 14px; padding: 11px 14px;
+    border: 1px solid #FF61694D; border-radius: var(--r);
+    background: linear-gradient(90deg, #FF61691A, #FF616908);
+  }
+  body.not-linked .link-banner { display: flex; }
+  .link-banner .icon {
+    flex: none; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--crit); color: #200; font-weight: 700; font-size: 13px;
+    display: grid; place-items: center;
+  }
+  .link-banner .txt { font-size: 12.5px; color: var(--text-dim); }
+  .link-banner .txt b { color: var(--text); }
+  .link-banner a {
+    margin-left: auto; flex: none; font-size: 12px; font-weight: 600;
+    color: #2A0A0C; background: var(--crit); text-decoration: none;
+    padding: 6px 13px; border-radius: var(--r-sm); white-space: nowrap;
+  }
+
+  .add-banner {
+    display: none; align-items: center; gap: 11px;
+    margin: 0 0 14px; padding: 11px 14px;
+    border: 1px solid var(--accent-dim, #6D45A8); border-radius: var(--r);
+    background: var(--accent-wash);
+  }
+  body.adding-account .add-banner { display: flex; }
+  .add-banner .txt { font-size: 12.5px; color: var(--text-dim); }
+  .add-banner button { margin-left: auto; flex: none; }
+  .add-banner .code {
+    font-family: var(--mono); font-size: 19px; font-weight: 700;
+    letter-spacing: .16em; color: var(--accent-2); user-select: all;
+  }
+
   .claim-banner {
     display: none; align-items: center; gap: 11px;
     margin: 0 0 14px; padding: 11px 14px;
@@ -355,15 +391,229 @@
     background: var(--surface); font-size: 12px; color: var(--muted);
   }
   code { font-family: var(--mono); font-size: 10.5px; background: var(--surface-3); padding: 1px 5px; border-radius: 4px; color: var(--text-dim); }
+
+
+  /* ------------------------------------------------------------- accounts */
+  /* One card per account, side by side. Every account is farming at once, so
+     the layout says so — a switcher would hide exactly the thing you opened the
+     app to check. Cards wrap and shrink rather than scrolling horizontally. */
+  .accounts {
+    display: grid; gap: 12px; margin-bottom: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+  }
+  .acct {
+    background: linear-gradient(180deg, var(--surface) 0%, var(--bg-2) 100%);
+    border: 1px solid var(--line); border-radius: var(--r);
+    padding: 13px 14px 12px; display: flex; flex-direction: column; gap: 10px;
+    box-shadow: 0 1px 0 #FFFFFF06 inset;
+  }
+  .acct.is-off { opacity: .55; }
+  .acct-top { display: flex; align-items: center; gap: 9px; }
+  .acct-name {
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .acct-state {
+    margin-left: auto; flex: none;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .09em;
+    text-transform: uppercase; padding: 2px 7px; border-radius: 100px;
+    border: 1px solid var(--line-2); color: var(--muted); background: var(--surface-2);
+  }
+  .acct-state.s-watching { color: var(--ok); border-color: #43D69A55; background: var(--ok-wash); }
+  .acct-state.s-suspect, .acct-state.s-stalled { color: var(--gold); border-color: #FFC15E55; background: var(--gold-wash); }
+  .acct-state.s-offline { color: var(--crit); border-color: #FF616955; background: var(--crit-wash); }
+  .acct-chan { font-size: 12px; color: var(--text-dim); }
+  .acct-chan b { color: var(--text); font-family: var(--mono); font-weight: 600; }
+  .acct-why { font-size: 11px; color: var(--muted); }
+
+  .acct-nums { display: flex; gap: 14px; }
+  .acct-num { display: flex; flex-direction: column; gap: 0; }
+  .acct-num .k {
+    font-family: var(--mono); font-size: 9px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .acct-num .v {
+    font-family: var(--mono); font-size: 15px; font-weight: 650;
+    font-variant-numeric: tabular-nums;
+  }
+  .acct-num .v .up { font-size: 10px; color: var(--ok); }
+  .acct-acts { display: flex; gap: 5px; margin-top: 2px; }
+  .acct-acts button { font-size: 10.5px; padding: 2px 8px; }
+  .acct-acts .rm:hover { color: var(--crit); border-color: var(--crit); }
+
+  .acct.add {
+    align-items: center; justify-content: center; gap: 7px; text-align: center;
+    border-style: dashed; min-height: 132px; cursor: pointer;
+  }
+  .acct.add:hover { border-color: var(--accent); background: var(--accent-wash); }
+  .acct.add .plus { font-size: 20px; color: var(--accent); line-height: 1; }
+  .acct.add .cap { font-size: 11.5px; color: var(--text-dim); }
+
+  /* The account chip on each log line. Without it a combined feed reads as one
+     machine contradicting itself. */
+  .row .acct-tag {
+    font-family: var(--mono); font-size: 9.5px; color: var(--accent-2);
+    background: var(--accent-wash); border: 1px solid #9D7BFF33;
+    border-radius: 100px; padding: 0 6px; flex: none; align-self: start;
+  }
+
+  /* ------------------------------------------------------ custom title bar */
+  /* Shown only in the app window: the native frame is off there, so the page
+     owes the user a way to move, minimise, maximise and close. In a browser tab
+     the real chrome is still there and this would be a second, fake one. */
+  .titlebar { display: none; }
+  body.windowed .titlebar {
+    display: flex; align-items: center; gap: 10px;
+    /* Above everything, the sign-in gate included. It is the only drag region
+       and the only way to close the window, so anything that covers it leaves a
+       frameless window that cannot be moved or dismissed — which is exactly what
+       a full-screen overlay does if it wins the stacking order. */
+    position: sticky; top: 0; z-index: 60;
+    height: 38px; padding: 0 0 0 14px;
+    background: color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter: saturate(140%) blur(12px);
+    border-bottom: 1px solid var(--line);
+    /* The whole bar is the drag handle — pywebview watches this class — with
+       the buttons opting out below, or you could never click them. */
+    user-select: none;
+  }
+  body.windowed { padding-top: 0; }
+  .titlebar .tb-name {
+    font-size: 12px; font-weight: 650; letter-spacing: -.005em; color: var(--text);
+  }
+  .titlebar .tb-name span { color: var(--accent); }
+  .titlebar .tb-state {
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .titlebar .tb-state .d {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--unknown);
+  }
+  .titlebar .tb-state.s-watching .d { background: var(--ok); }
+  .titlebar .tb-state.s-paused .d,
+  .titlebar .tb-state.s-suspect .d,
+  .titlebar .tb-state.s-stalled .d { background: var(--gold); }
+  .titlebar .tb-state.s-offline .d { background: var(--crit); }
+
+  .tb-buttons { margin-left: auto; display: flex; height: 100%; -webkit-app-region: no-drag; }
+  .tb-buttons button {
+    width: 46px; height: 100%; border: 0; border-radius: 0; padding: 0;
+    background: transparent; color: var(--text-dim); cursor: default;
+    display: grid; place-items: center;
+  }
+  .tb-buttons button:hover { background: var(--surface-2); color: var(--text); }
+  /* Red on hover for close, the way every Windows app does it — the muscle
+     memory is stronger than anything a custom colour would teach. */
+  .tb-buttons button.tb-close:hover { background: #E5484D; color: #fff; }
+  .tb-buttons svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.2; }
+
+  /* --------------------------------------------------- app-window controls */
+  .shell { display: none; gap: 6px; }
+  body.windowed .shell { display: flex; }
+  .shell button.danger:hover { color: var(--crit); border-color: var(--crit); }
+
+  /* ------------------------------------------------------------- sign-in gate */
+  .gate {
+    position: fixed; inset: 0; z-index: 50; display: none;
+    align-items: center; justify-content: center; padding: 24px;
+    background: var(--bg);
+  }
+  body.signed-out .gate { display: flex; }
+  /* Start below the title bar rather than under it, so the bar stays visible as
+     well as clickable — a drag handle you cannot see is not much better than one
+     you cannot reach. 38px is the bar's height. */
+  body.windowed .gate { top: 38px; }
+  /* The dashboard behind it would be all zeroes and empty states — accurate, but
+     it reads as "broken" rather than "not signed in yet". */
+  body.signed-out .wrap { filter: blur(2px); opacity: .25; pointer-events: none; }
+
+  .gate-card {
+    width: min(460px, 100%); background: var(--surface);
+    border: 1px solid var(--line); border-radius: calc(var(--r) * 1.6);
+    box-shadow: var(--shadow); padding: 30px 30px 26px; text-align: center;
+  }
+  .gate-card h2 { margin: 0 0 8px; font-size: 17px; font-weight: 650; }
+  .gate-card p { margin: 0 0 20px; font-size: 12.5px; color: var(--text-dim); line-height: 1.55; }
+  .gate-mark {
+    width: 42px; height: 42px; margin: 0 auto 16px; border-radius: 12px;
+    background: var(--accent-wash); border: 1px solid var(--accent-dim);
+    display: grid; place-items: center;
+  }
+  .gate-mark svg { display: block; }
+  .gate-card button.cta {
+    font-size: 12.5px; font-weight: 600; padding: 9px 20px;
+    color: #fff; background: var(--accent); border-color: var(--accent);
+  }
+  .gate-card button.cta:hover { filter: brightness(1.08); }
+  .gate-card button.cta[disabled] { opacity: .55; cursor: default; filter: none; }
+
+  .gate-code {
+    display: none; margin-top: 4px;
+    border-top: 1px solid var(--line); padding-top: 20px;
+  }
+  body.gate-pending .gate-code { display: block; }
+  body.gate-pending .gate-start { display: none; }
+  .gate-code .digits {
+    font-family: var(--mono); font-size: 27px; font-weight: 600;
+    letter-spacing: .18em; color: var(--text); margin: 10px 0 4px;
+    /* The whole point of this screen is transcribing it into a browser. */
+    user-select: all;
+  }
+  .gate-code .hint { font-size: 11.5px; color: var(--muted); }
+  .gate-err { margin-top: 14px; font-size: 11.5px; color: var(--crit); min-height: 14px; }
+  .gate-foot { margin-top: 18px; font-size: 11px; color: var(--muted); line-height: 1.5; }
 </style>
 </head>
 <body>
+
+<!-- The app window's own chrome. `pywebview-drag-region` is the class pywebview
+     watches to decide what moves a frameless window; the buttons sit outside it
+     so clicking them does not drag. -->
+<div class="titlebar pywebview-drag-region" id="titlebar">
+  <span class="tb-name pywebview-drag-region">drop<span>watch</span></span>
+  <span class="tb-state pywebview-drag-region" id="tbState"><span class="d"></span><span id="tbStateText">starting…</span></span>
+  <div class="tb-buttons">
+    <button id="tbMin" title="Minimise" aria-label="Minimise">
+      <svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg>
+    </button>
+    <button id="tbMax" title="Maximise" aria-label="Maximise">
+      <svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg>
+    </button>
+    <button id="tbClose" class="tb-close" title="Close to tray — keeps watching" aria-label="Close to tray">
+      <svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10"/></svg>
+    </button>
+  </div>
+</div>
+
 <div class="wrap">
   <header>
-    <h1>ow<span>·</span>watch<span>·</span>bot</h1>
+    <h1>drop<span>watch</span></h1>
     <span class="v" id="ver">live</span>
     <div class="conn" id="conn"><span class="dot"></span><span id="connText">connecting…</span></div>
+    <div class="shell">
+      <button id="btnHide" title="Keep watching in the background — the tray icon brings it back">
+        Hide to tray
+      </button>
+      <button id="btnQuit" class="danger" title="Stop watching and close dropwatch">Quit</button>
+    </div>
   </header>
+
+  <div class="link-banner" id="linkBanner">
+    <span class="icon">!</span>
+    <span class="txt">
+      <b>Twitch is not linked to Battle.net.</b>
+      Watch time is being reported and accepted, but Twitch will credit
+      <b>zero minutes</b> until the accounts are connected.
+    </span>
+    <a id="linkFix" href="https://account.battle.net/connections" target="_blank" rel="noopener">Link accounts →</a>
+  </div>
+
+  <div class="add-banner" id="addBanner">
+    <span class="txt">Enter this code on Twitch to add an account:</span>
+    <span class="code" id="addCode">————</span>
+    <span class="txt" id="addLeft"></span>
+    <button id="addCancel">Cancel</button>
+  </div>
 
   <div class="claim-banner" id="claimBanner">
     <span class="big" id="claimCount">0</span>
@@ -371,9 +621,11 @@
     <a href="https://www.twitch.tv/drops/inventory" target="_blank" rel="noopener">Claim on Twitch →</a>
   </div>
 
+  <div class="accounts" id="accounts"></div>
+
   <div class="grid">
     <div class="col">
-      <section class="card">
+      <section class="card" id="heroCard">
         <div class="hero">
           <div class="hero-top">
             <div class="pill s-unknown" id="pill"><span class="d"></span><span id="stateName">—</span></div>
@@ -393,7 +645,7 @@
 
       <section class="card">
         <div class="head">
-          <span class="eyebrow">Rewards</span>
+          <span class="eyebrow">Rewards</span><span id="dropsFor" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
           <span class="v" id="dropsMeta" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
         </div>
         <div id="camps"><div class="empty">Loading campaigns…</div></div>
@@ -498,6 +750,45 @@
   </div>
 </div>
 
+<div class="gate" id="gate">
+  <div class="gate-card">
+    <div class="gate-mark">
+      <!-- The app mark, matching the tray and taskbar icon. -->
+      <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+        <path d="M12 3.2 C12 3.2 19 12 19 15.4 A7 7 0 0 1 5 15.4 C5 12 12 3.2 12 3.2 Z"
+              fill="#9D7BFF"/>
+      </svg>
+    </div>
+    <h2>Connect a Twitch account</h2>
+    <p>
+      dropwatch reports watch time on your behalf, so it needs to be signed in
+      before it can earn anything. Nothing else on this screen works until it is.
+    </p>
+
+    <div class="gate-start">
+      <button class="cta" id="btnConnect">Connect Twitch account</button>
+    </div>
+
+    <div class="gate-code">
+      <div class="hint">Enter this code on Twitch:</div>
+      <div class="digits" id="gateCode">————</div>
+      <div class="hint">
+        at <span id="gateUri">twitch.tv/activate</span> — we opened it in your browser.
+      </div>
+      <div class="gate-foot">
+        Waiting for you to approve it. Watching starts by itself the moment you do.
+      </div>
+    </div>
+
+    <div class="gate-err" id="gateErr"></div>
+    <div class="gate-foot">
+      This grants read-only access. It does not link Twitch to Battle.net — that
+      is separate, and drops need it, so check
+      <a href="https://www.twitch.tv/settings/connections" target="_blank" rel="noopener">your connections</a>.
+    </div>
+  </div>
+</div>
+
 <script>
 (() => {
   "use strict";
@@ -508,6 +799,11 @@
   };
   const MAX_ROWS = 600;
   let rows = [], filter = "all", follow = true;
+
+  // The app window keeps a persistent browser profile, so Chromium restores
+  // wherever the page was scrolled to last time — which means launching the app
+  // drops you halfway down a chart instead of at the status you opened it for.
+  if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -532,9 +828,25 @@
 
   function renderState(s) {
     $("ver").textContent = `v${s.version} · live`;
+    // Drives the Hide/Quit buttons. Sent on every poll rather than read once at
+    // load, so a page left open across a restart into `serve` corrects itself.
+    document.body.classList.toggle("windowed", !!s.windowed);
     const state = (s.paused ? "PAUSED" : s.state) || "UNKNOWN";
     $("pill").className = "pill s-" + state.toLowerCase();
     $("stateName").textContent = state;
+    // The title bar is often all that's visible after a resize, so it carries
+    // the same state the hero pill does.
+    if (s.accounts) renderAccounts(s.accounts);
+    // The inventory below belongs to one account. With a fleet running, an
+    // unlabelled ladder reads as a combined total it is not.
+    const first = (s.accounts || [])[0];
+    $("dropsFor").textContent =
+      (s.accounts || []).length > 1 && first ? `for ${first.name}` : "";
+    $("tbState").className = "tb-state pywebview-drag-region s-" + state.toLowerCase();
+    const live = (s.accounts || []).filter((a) => a.authenticated);
+    $("tbStateText").textContent = live.length > 1
+      ? `${live.filter((a) => a.state === "WATCHING").length}/${live.length} watching`
+      : (s.channel ? `${state} · ${s.channel}` : state);
     $("chan").textContent = s.channel || "—";
     $("reason").textContent = s.reason || "";
 
@@ -570,6 +882,12 @@
   }
 
   function renderDrops(d) {
+    // Tri-state: true / false / null. Only false is worth shouting about —
+    // null means no campaign is in progress to check against, which is normal
+    // between campaigns and must not raise a warning.
+    document.body.classList.toggle("not-linked", d.account_linked === false);
+    if (d.account_link_url) $("linkFix").href = d.account_link_url;
+
     const camps = d.campaigns || [];
     const total = d.claimable_total || 0;
 
@@ -663,8 +981,13 @@
   function rowHTML(rec) {
     const sig = rec.kind === "transition" && rec.detail && rec.detail.signals
       ? " " + Object.entries(rec.detail.signals).map(([k, v]) => `${k}=${v}`).join(" ") : "";
+    // Only once more than one account is running — a lone account would put the
+    // same chip on every line for no information.
+    const tag = (rec.account && accounts.length > 1)
+      ? `<span class="acct-tag">${esc(rec.account)}</span>` : "";
     return `<div class="row k-${esc(rec.kind)} lv-${esc(rec.level)}">
       <span class="t">${esc(fmtTime(rec.ts))}</span>
+      ${tag}
       <span class="lbl">${esc(rec.label)}</span>
       <span class="msg">${esc(rec.message)}${esc(sig)}</span>
     </div>`;
@@ -835,7 +1158,179 @@
     post("/api/control", { action: "open_twitch" });
   });
 
+
+  // ---------------------------------------------------------------- accounts
+  // Rendered from /api/state, which carries the whole fleet. Each card is one
+  // account farming on its own; they commonly land on the same channel, which is
+  // correct — drops accrue per account.
+  let accounts = [];
+
+  function acctHTML(a) {
+    const state = (a.state || "UNKNOWN").toUpperCase();
+    const st = a.stats || {};
+    const credited = (st.credited_now === null || st.credited_now === undefined)
+      ? "—"
+      : `${st.credited_now}` + (st.credited_gain ? ` <span class="up">+${st.credited_gain}</span>` : "");
+    const mins = Math.floor((st.uptime || 0) / 60);
+    return `<div class="acct ${a.enabled ? "" : "is-off"}" data-account="${esc(a.name)}">
+      <div class="acct-top">
+        <span class="acct-name">${esc(a.name || a.login || "unnamed")}</span>
+        <span class="acct-state s-${esc(state.toLowerCase())}">${esc(state)}</span>
+      </div>
+      <div>
+        <div class="acct-chan">${a.channel ? `watching <b>${esc(a.channel)}</b>` : "no target"}</div>
+        <div class="acct-why">${esc(a.reason || "")}</div>
+      </div>
+      <div class="acct-nums">
+        <div class="acct-num"><span class="k">Credited</span><span class="v">${credited}</span></div>
+        <div class="acct-num"><span class="k">Session</span><span class="v">${mins}<span class="up" style="color:var(--muted)">m</span></span></div>
+        <div class="acct-num"><span class="k">Cycles</span><span class="v">${st.cycles ?? 0}</span></div>
+      </div>
+      <div class="acct-acts">
+        <button data-act="${a.paused ? "resume" : "pause"}">${a.paused ? "Resume" : "Pause"}</button>
+        <button data-act="${a.enabled ? "disable" : "enable"}">${a.enabled ? "Disable" : "Enable"}</button>
+        <button class="rm" data-act="remove">Remove</button>
+      </div>
+    </div>`;
+  }
+
+  function renderAccounts(list) {
+    accounts = list || [];
+    const multi = accounts.length > 1;
+    // With one account the hero card below already says everything; showing a
+    // near-identical card above it is just noise.
+    $("accounts").innerHTML =
+      (multi ? accounts.map(acctHTML).join("") : "") +
+      `<div class="acct add" id="addAcct">
+         <span class="plus">+</span>
+         <span class="cap">Add another account</span>
+       </div>`;
+    const hero = $("heroCard");
+    if (hero) hero.style.display = multi ? "none" : "";
+  }
+
+  $("accounts").addEventListener("click", async (ev) => {
+    if (ev.target.closest("#addAcct")) {
+      await post("/api/auth/login", { add: true }).catch(() => {});
+      pollAuth();
+      return;
+    }
+    const btn = ev.target.closest("button[data-act]");
+    if (!btn) return;
+    const card = btn.closest(".acct");
+    const name = card && card.dataset.account;
+    const act = btn.dataset.act;
+    if (act === "remove") {
+      if (!confirm(`Remove ${name}? Its token is deleted from this machine; its watch history is kept.`)) return;
+      await post("/api/accounts", { account: name, action: "remove" }).catch(() => {});
+    } else if (act === "enable" || act === "disable") {
+      await post("/api/accounts", { account: name, action: act }).catch(() => {});
+    } else {
+      await post("/api/control", { account: name, action: act }).catch(() => {});
+    }
+    pollState();
+  });
+
+  // -------------------------------------------------------- window controls
+  const shell = (action) => post("/api/control", { action }).catch(() => {});
+
+  $("tbMin").addEventListener("click", () => shell("minimize"));
+  $("tbMax").addEventListener("click", () => shell("maximize"));
+  $("tbClose").addEventListener("click", () => shell("hide"));
+  // Double-clicking the bar toggles maximise, as it does on every native window.
+  // Guarded to the drag region so a double-click on a button isn't counted twice.
+  $("titlebar").addEventListener("dblclick", (ev) => {
+    if (ev.target.closest(".tb-buttons")) return;
+    shell("maximize");
+  });
+
+  // Close is already "hide" — the window cancels it — so this button exists for
+  // the people who look for an explicit one rather than trusting the X.
+  $("btnHide").addEventListener("click", () => post("/api/control", { action: "hide" }));
+  $("btnQuit").addEventListener("click", () => {
+    if (!confirm("Stop watching and close dropwatch?")) return;
+    post("/api/control", { action: "quit" }).catch(() => {});
+    document.body.classList.add("quitting");
+  });
+
+  // ------------------------------------------------------------ signing in
+  // Polled rather than pushed: the device flow completes on Twitch's schedule,
+  // in a different browser, with nothing to notify us. Once a second is cheap
+  // and makes the transition feel immediate.
+  let authTimer = null;
+
+  async function pollAuth() {
+    let a;
+    try {
+      const r = await fetch("/api/auth");
+      if (!r.ok) return;
+      a = await r.json();
+    } catch { return; }
+
+    // A server built without auth wiring (a bare `serve`) must not be gated.
+    const signedOut = a.supported && !a.authenticated;
+    document.body.classList.toggle("signed-out", signedOut);
+
+    const flow = a.flow;
+    const pending = signedOut && flow && flow.state === "pending" && flow.expires_in > 0;
+    document.body.classList.toggle("gate-pending", !!pending);
+
+    // An "add another account" flow must not blank the dashboard: the accounts
+    // already farming are still farming, and hiding them would look like a crash.
+    document.body.classList.toggle("gate-pending", !!pending && !flow.adding);
+    if (flow && flow.state === "pending" && flow.adding) {
+      $("addCode").textContent = flow.user_code || "————";
+      const left = Math.max(0, Math.round(flow.expires_in || 0));
+      $("addLeft").textContent = `Waiting ${left}s — opened twitch.tv/activate in your browser.`;
+      document.body.classList.add("adding-account");
+    } else {
+      document.body.classList.remove("adding-account");
+    }
+    if (pending) {
+      $("gateCode").textContent = flow.user_code || "————";
+      $("gateUri").textContent = (flow.verification_uri || "").replace(/^https?:\/\//, "");
+    }
+    if (flow && flow.state === "error") {
+      $("gateErr").textContent = flow.error || "That did not work. Try again.";
+      $("btnConnect").disabled = false;
+      $("btnConnect").textContent = "Try again";
+    } else if (flow && flow.state === "timeout") {
+      $("gateErr").textContent = "The code expired unused. Start again when ready.";
+      $("btnConnect").disabled = false;
+      $("btnConnect").textContent = "Connect Twitch account";
+    }
+
+    // Keep polling while there is anything to watch: signed out (waiting for a
+    // first account) or a device flow in progress. Polling only while signed out
+    // meant that adding a *second* account — where you are already authenticated
+    // — stopped the poll on its first pass, so the code never updated and never
+    // cleared.
+    const busy = signedOut || (flow && flow.state === "pending");
+    if (!busy && authTimer) { clearInterval(authTimer); authTimer = null; }
+    if (busy && !authTimer) authTimer = setInterval(pollAuth, 1000);
+  }
+
+  $("addCancel").addEventListener("click", async () => {
+    await post("/api/auth/cancel", {}).catch(() => {});
+    pollAuth();
+  });
+
+  $("btnConnect").addEventListener("click", async () => {
+    $("btnConnect").disabled = true;
+    $("btnConnect").textContent = "Opening Twitch…";
+    $("gateErr").textContent = "";
+    try {
+      await post("/api/auth/login", {});
+    } catch {
+      $("gateErr").textContent = "Could not reach Twitch. Check your connection.";
+      $("btnConnect").disabled = false;
+      $("btnConnect").textContent = "Try again";
+    }
+    pollAuth();
+  });
+
   connect();
+  pollAuth();
   pollState(); pollDrops(); pollHistory(); pollSettings();
   setInterval(pollState, 2000);
   setInterval(pollDrops, 30000);

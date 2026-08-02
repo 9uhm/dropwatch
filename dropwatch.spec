@@ -18,6 +18,9 @@ datas = [
     ("ui/stats.js", "ui"),
     ("ui/console.html", "ui"),
     ("config.example.toml", "."),
+    # Windows needs a real file for the window/taskbar icon, so unlike the tray
+    # -- which draws its own at runtime -- this one has to ride in the bundle.
+    ("packaging/dropwatch.ico", "."),
 ]
 
 hiddenimports = [
@@ -41,6 +44,18 @@ hiddenimports = [
     "pystray._win32",
     "PIL.Image",
     "PIL.ImageDraw",
+    # The app window. pywebview picks its backend at import time the same way
+    # pystray does, so the WinForms/WebView2 one is named explicitly; without it
+    # a frozen build reports "no window available" and silently falls back to the
+    # browser, which looks like a missing WebView2 runtime rather than a bad spec.
+    #
+    # pythonnet's own files (Python.Runtime.dll, the clr_loader runtime configs)
+    # come from the bundled hooks for `clr`, `clr_loader` and `webview` — they
+    # cannot be listed here because they are data, not importable modules.
+    "webview",
+    "webview.platforms.winforms",
+    "clr",
+    "clr_loader",
 ]
 
 excludes = [
@@ -85,11 +100,27 @@ exe = EXE(
     a.datas,
     [],
     name="dropwatch",
+    icon="packaging/dropwatch.ico",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,          # UPX trips a lot of antivirus heuristics; not worth it
-    console=True,       # the log output *is* the interface without Discord
+    # Windowed subsystem: Windows never creates a console for this process, so
+    # there is never one to flash, hide, or leave sitting behind the app.
+    #
+    # The obvious alternative -- console=True with hide_console="hide-early" --
+    # was tried and does not hold up. It hides whatever GetConsoleWindow()
+    # returns, which is the classic conhost window; when Windows Terminal is the
+    # default terminal host (the default on Windows 11) the visible window belongs
+    # to WindowsTerminal.exe instead, so there is nothing for us to hide and the
+    # console stays on screen. It "works" on a conhost machine and fails on the
+    # next one, which is the worst kind of working.
+    #
+    # CLI output survives this: main() calls attach_parent_console(), which
+    # borrows the terminal's console when there is one. See log.py.
+    console=False,
+    # Keep the windowed traceback dialog: with no console, a crash before logging
+    # is configured would otherwise be completely silent.
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

@@ -117,6 +117,9 @@ class EventBus:
         if inspect.isawaitable(result):
             await result
 
+    def scoped(self, account: str) -> AccountBus:
+        return AccountBus(self, account)
+
     def history(self, limit: int | None = None, *types: EventType) -> list[Event]:
         items = list(self._history)
         if types:
@@ -124,3 +127,37 @@ class EventBus:
             items = [e for e in items if e.type in wanted]
         items.reverse()  # newest first
         return items[:limit] if limit else items
+
+
+class AccountBus:
+    """A bus view that stamps every publish with the account that caused it.
+
+    With several accounts farming at once, an untagged ``watch.started`` is
+    ambiguous — the dashboard cannot tell which card it belongs to and the log
+    reads as one machine contradicting itself. Wrapping the bus rather than
+    threading an ``account=`` argument through every publish call keeps the
+    watcher unaware there is more than one of it.
+
+    Subscription is delegated unchanged: handlers still see the whole stream.
+    """
+
+    __slots__ = ("_bus", "_account")
+
+    def __init__(self, bus: EventBus, account: str) -> None:
+        self._bus = bus
+        self._account = account
+
+    @property
+    def account(self) -> str:
+        return self._account
+
+    async def publish(self, type_: EventType, /, **payload: Any) -> Event:
+        # Explicit wins: a caller that already named an account meant it.
+        payload.setdefault("account", self._account)
+        return await self._bus.publish(type_, **payload)
+
+    def subscribe(self, handler: Handler, *types: EventType) -> Callable[[], None]:
+        return self._bus.subscribe(handler, *types)
+
+    def history(self, limit: int | None = None, *types: EventType) -> list[Event]:
+        return self._bus.history(limit, *types)

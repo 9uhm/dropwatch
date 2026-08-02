@@ -179,6 +179,15 @@ query Inventory {
     id
     inventory {
       dropCampaignsInProgress {
+        # The account-connection gate. Twitch credits zero minutes when the
+        # required external account (Battle.net for Overwatch) is not linked, and
+        # says nothing about it anywhere else -- so without this the bot reports
+        # a perfectly healthy watch loop earning nothing, forever.
+        #
+        # accountLinkURL is the page that fixes it, from Twitch rather than
+        # hardcoded, because it differs per campaign publisher.
+        accountLinkURL
+        self { isAccountConnected }
         id
         name
         status

@@ -227,25 +227,71 @@ def terminate(pid: int) -> bool:
 # ----------------------------------------------------------------------- tray
 
 
-def _icon_image(size: int = 64) -> Any:
-    """Draw the tray icon rather than shipping an asset.
+#: The mark's palette, matching the dashboard's own tokens.
+_INK = (11, 15, 22, 255)
+_ACCENT = (169, 112, 255, 255)
+_ACCENT_DIM = (109, 69, 168, 255)
 
-    Keeps the frozen build free of a binary resource, and means the icon can't go
-    missing from the bundle.
+
+def icon_image(size: int = 64) -> Any:
+    """Draw the app mark: a violet drop on a dark rounded square.
+
+    Drawn rather than loaded so the tray never depends on an asset surviving the
+    bundle, and rendered proportionally at whatever size is asked for so the 16px
+    version keeps its shape instead of being a smeared downscale of the 256px one.
+    ``packaging/make_icon.py`` bakes the same drawing into the .ico that Windows
+    needs for the executable and the title bar.
+
+    Everything here is deliberately one shape and one colour. At 16px — the tray,
+    where this is seen most — anything more resolves to a smudge.
     """
     from PIL import Image, ImageDraw
 
-    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    # Supersample: PIL has no antialiasing for polygons, and the drop's tip is a
+    # diagonal that looks visibly stepped without it.
+    ss = 8 if size <= 64 else 4
+    px = size * ss
+    image = Image.new("RGBA", (px, px), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    pad = size // 8
+
+    pad = px * 0.055
     draw.rounded_rectangle(
-        [pad, pad, size - pad, size - pad], radius=size // 5, fill=(14, 19, 28, 255)
+        [pad, pad, px - pad, px - pad], radius=px * 0.22, fill=_INK, outline=_ACCENT_DIM,
+        width=max(1, int(px * 0.012)),
     )
-    # A single violet dot: legible at 16px, where anything more becomes mush.
-    r = size // 5
-    c = size // 2
-    draw.ellipse([c - r, c - r, c + r, c + r], fill=(157, 123, 255, 255))
-    return image
+
+    # A teardrop: a circle for the bulb, a triangle for the tip, sharing a chord.
+    # Proportions chosen so the silhouette still reads as a drop at 16px, where a
+    # narrower classic teardrop turns into a featureless blob.
+    cx = px / 2
+    bulb_r = px * 0.215
+    bulb_cy = px * 0.605
+    tip_y = px * 0.235
+    # Where the triangle's sides meet the circle tangentially — computed rather
+    # than eyeballed so the join stays smooth at every size.
+    dy = bulb_cy - tip_y
+    sin_t = bulb_r / dy
+    cos_t = (1 - sin_t * sin_t) ** 0.5
+    join_dx = bulb_r * cos_t
+    join_dy = bulb_r * sin_t
+
+    draw.ellipse(
+        [cx - bulb_r, bulb_cy - bulb_r, cx + bulb_r, bulb_cy + bulb_r], fill=_ACCENT
+    )
+    draw.polygon(
+        [
+            (cx, tip_y),
+            (cx - join_dx, bulb_cy - join_dy),
+            (cx + join_dx, bulb_cy - join_dy),
+        ],
+        fill=_ACCENT,
+    )
+
+    return image.resize((size, size), Image.LANCZOS)
+
+
+#: Kept as the old private name so nothing that imported it breaks.
+_icon_image = icon_image
 
 
 class Tray:
@@ -266,6 +312,9 @@ class Tray:
         on_quit: Callable[[], Any],
         current_channel: Callable[[], str | None],
         is_paused: Callable[[], bool],
+        on_show: Callable[[], Any] | None = None,
+        on_hide: Callable[[], Any] | None = None,
+        is_hidden: Callable[[], bool] | None = None,
     ) -> None:
         self._loop = loop
         self._url = dashboard_url
@@ -274,8 +323,17 @@ class Tray:
         self._on_quit = on_quit
         self._channel = current_channel
         self._paused = is_paused
+        #: Set only when a native window exists. Without them the menu falls back
+        #: to opening the dashboard in a browser, which is all ``serve`` can do.
+        self._on_show = on_show
+        self._on_hide = on_hide
+        self._is_hidden = is_hidden
         self._icon: Any = None
         self._thread: threading.Thread | None = None
+
+    @property
+    def windowed(self) -> bool:
+        return self._on_show is not None
 
     def _submit(self, factory: Callable[[], Any]) -> None:
         """Run a coroutine on the watcher's loop from this native thread."""
@@ -297,7 +355,22 @@ class Tray:
             self._submit(self._on_resume if self._paused() else self._on_pause)
 
         def open_dash(_icon: Any, _item: Any) -> None:
+            """The default action: raise our own window if we have one."""
+            if self._on_show is not None:
+                try:
+                    self._on_show()
+                except Exception as exc:  # noqa: BLE001 — a menu click must not crash
+                    log.debug("could not show the window: %s", exc)
+                return
             open_url(self._url, what="dashboard")
+
+        def hide_window(_icon: Any, _item: Any) -> None:
+            if self._on_hide is None:
+                return
+            try:
+                self._on_hide()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("could not hide the window: %s", exc)
 
         def open_twitch(_icon: Any, _item: Any) -> None:
             login = self._channel()
@@ -308,11 +381,21 @@ class Tray:
             self._submit(self._on_quit)
             icon.stop()
 
+        # Double-clicking the icon fires the default item, so that has to be the
+        # one that brings the app back — it's the gesture everyone tries first.
+        window_items: tuple[Any, ...] = ()
+        if self.windowed:
+            window_items = (
+                MenuItem("Hide window", hide_window,
+                         enabled=lambda _: not (self._is_hidden and self._is_hidden())),
+            )
+
         menu = Menu(
             MenuItem(lambda _: f"dropwatch — {self._channel() or 'idle'}", open_dash,
                      default=True, enabled=True),
             Menu.SEPARATOR,
-            MenuItem("Open dashboard", open_dash),
+            MenuItem("Open dashboard" if not self.windowed else "Show window", open_dash),
+            *window_items,
             MenuItem(lambda _: f"Open twitch.tv/{self._channel()}" if self._channel()
                      else "Open Twitch (no target)", open_twitch,
                      enabled=lambda _: self._channel() is not None),

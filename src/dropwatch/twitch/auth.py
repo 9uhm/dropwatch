@@ -113,13 +113,24 @@ class DeviceFlow:
 
 
 class TokenStore:
-    """Reads and writes ``tokens.json``, tightening file permissions on write."""
+    """Reads and writes one account's token file, tightening permissions on write.
+
+    ``path=None`` means *unclaimed*: there is no file yet because we do not know
+    which account this will be. That is the state a fresh install is in while the
+    device flow runs — the login only arrives with the token, so the filename can
+    only be decided at save time. Once saved, the store is claimed and behaves
+    like any other.
+    """
 
     def __init__(self, path: Path | None = None) -> None:
-        self.path = path or paths.TOKEN_PATH
+        self.path = path
+
+    @property
+    def claimed(self) -> bool:
+        return self.path is not None
 
     def load(self) -> TokenSet | None:
-        if not self.path.exists():
+        if self.path is None or not self.path.exists():
             return None
         try:
             data = json.loads(self.path.read_text("utf-8"))
@@ -131,7 +142,22 @@ class TokenStore:
         return tokens
 
     def save(self, tokens: TokenSet) -> None:
-        paths.ensure_data_dir()
+        if self.path is None:
+            # An unclaimed store names its file after the account's login — but
+            # the device flow saves twice, and the *first* save happens before
+            # /validate has told us who this is. Naming the file from that empty
+            # login filed every new account as "default.json", so the second one
+            # overwrote the first.
+            #
+            # So: no identity, no file. The save that follows validation has a
+            # login and writes it correctly. Dropping an unidentifiable token
+            # costs a re-login at worst, and only if the process dies inside that
+            # one-second window.
+            if not tokens.login or not paths.is_valid_account_name(tokens.login):
+                log.debug("holding tokens until the account's login is known")
+                return
+            self.path = paths.token_path(tokens.login)
+        paths.ensure_accounts_dir()
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(tokens.model_dump_json(indent=2), encoding="utf-8")
         self._harden(tmp)
@@ -140,7 +166,8 @@ class TokenStore:
         log.debug("tokens saved to %s", self.path)
 
     def clear(self) -> None:
-        self.path.unlink(missing_ok=True)
+        if self.path is not None:
+            self.path.unlink(missing_ok=True)
 
     @staticmethod
     def _register_secrets(tokens: TokenSet) -> None:

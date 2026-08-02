@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dropwatch"
-version = "0.2.1"
+version = "0.4.0"
 description = "Twitch drop campaign miner with multi-signal stream-end detection"
 requires-python = ">=3.13"
 dependencies = [
@@ -16,6 +16,11 @@ dependencies = [
     # it — but declared here because a detached run has no other way to be stopped.
     "pystray>=0.19",
     "pillow>=10.0",
+    # The desktop window. Hosts the same dashboard page in a WebView2 control so
+    # closing it can mean "hide to the tray" — a browser tab cannot be told that.
+    # Optional at runtime in the same sense as pystray: without it the app opens
+    # the dashboard in the default browser and keeps running.
+    "pywebview>=6.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

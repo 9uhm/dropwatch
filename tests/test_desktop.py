@@ -183,15 +183,44 @@ class FakeRequest:
 
 
 class FakeWatcher:
-    def __init__(self) -> None:
+    """Stands in for a Watcher. Mirrors the real WatcherStatus shape.
+
+    The dashboard renders every field of it, so a double that is missing one
+    fails at render time rather than at the assertion — keep this in step with
+    :class:`dropwatch.watcher.WatcherStatus`.
+    """
+
+    def __init__(self, channel: str | None = "ow_esports") -> None:
         self.paused = False
         self.resumed = False
+        self.stopped = False
+        self._channel = channel
 
     def status(self) -> Any:
+        channel = self._channel
+
+        class Stats:
+            cycles = 3
+            minutes_sent = 3
+            telemetry_rejected = 0
+            credited_start = 100
+            credited_now = 103
+            credited_gain = 3
+            required = 720
+            uptime = 180.0
+
         class S:
             state = "WATCHING"
-            channel = "ow_esports"
+            reason = "live and eligible"
+            signals: dict[str, str] = {}
+            stats = Stats()
+            rotations = 0
             paused = False
+            grace_remaining = 0.0
+            pubsub_connected = True
+            last_verdict_at = 0.0
+
+        S.channel = channel  # type: ignore[attr-defined]
         return S()
 
     async def pause(self) -> None:
@@ -199,6 +228,9 @@ class FakeWatcher:
 
     async def resume(self) -> None:
         self.resumed = True
+
+    async def stop(self) -> None:
+        self.stopped = True
 
 
 def _dashboard(manager: ConfigManager, watcher: Any = None) -> Dashboard:
